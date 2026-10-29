@@ -41,6 +41,7 @@ export const COLORS = {
   hudText: '#f5f5f5',
   hudWarn: '#ff5252',
   hudHint: '#9e9e9e',
+  menuActive: '#ffc400',
   overlay: 0x101014,
   exitFrame: 0x5d4037,
   exitDoor: 0x8d6e63,

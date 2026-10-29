@@ -20,6 +20,10 @@ const EIGHTH = 60 / BPM / 2;
 export class Sound {
   private ctx?: AudioContext;
   private master?: GainNode;
+  private musicBus?: GainNode;
+  private sfxBus?: GainNode;
+  private musicOn = true;
+  private sfxOn = true;
   private noiseBuffer?: AudioBuffer;
   private musicTimer?: number;
   private nextNoteTime = 0;
@@ -43,6 +47,11 @@ export class Sound {
       this.master = this.ctx.createGain();
       this.master.gain.value = this.muted ? 0 : 0.5;
       this.master.connect(this.ctx.destination);
+      this.musicBus = this.ctx.createGain();
+      this.sfxBus = this.ctx.createGain();
+      this.musicBus.connect(this.master);
+      this.sfxBus.connect(this.master);
+      this.applyBuses();
       const len = this.ctx.sampleRate;
       this.noiseBuffer = this.ctx.createBuffer(1, len, len);
       const data = this.noiseBuffer.getChannelData(0);
@@ -51,6 +60,19 @@ export class Sound {
     if (this.ctx.state === 'suspended') void this.ctx.resume();
   }
 
+  /** Music and sound effects can be switched off separately (from Settings). */
+  configure({ music, sfx }: { music: boolean; sfx: boolean }): void {
+    this.musicOn = music;
+    this.sfxOn = sfx;
+    this.applyBuses();
+  }
+
+  private applyBuses(): void {
+    if (this.musicBus) this.musicBus.gain.value = this.musicOn ? 1 : 0;
+    if (this.sfxBus) this.sfxBus.gain.value = this.sfxOn ? 1 : 0;
+  }
+
+  /** M key: silences everything, on top of the Settings toggles. */
   toggleMute(): void {
     this.muted = !this.muted;
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.5;
@@ -116,15 +138,23 @@ export class Sound {
     const ctx = this.ctx!;
     while (this.nextNoteTime < ctx.currentTime + 0.12) {
       const bass = BASS[this.step % BASS.length];
-      this.tone(hz(bass), this.nextNoteTime, EIGHTH * 0.9, 'triangle', 0.28);
+      this.tone(hz(bass), this.nextNoteTime, EIGHTH * 0.9, 'triangle', 0.28, undefined, this.musicBus);
       const lead = LEAD[this.step % LEAD.length];
-      if (lead !== '-') this.tone(hz(lead), this.nextNoteTime, EIGHTH * 0.8, 'square', 0.05);
+      if (lead !== '-') this.tone(hz(lead), this.nextNoteTime, EIGHTH * 0.8, 'square', 0.05, undefined, this.musicBus);
       this.nextNoteTime += EIGHTH;
       this.step++;
     }
   }
 
-  private tone(freq: number, start: number, dur: number, type: OscillatorType, vol: number, slideTo?: number): void {
+  private tone(
+    freq: number,
+    start: number,
+    dur: number,
+    type: OscillatorType,
+    vol: number,
+    slideTo?: number,
+    out = this.sfxBus,
+  ): void {
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -133,7 +163,7 @@ export class Sound {
     if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, start + dur);
     gain.gain.setValueAtTime(vol, start);
     gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-    osc.connect(gain).connect(this.master!);
+    osc.connect(gain).connect(out!);
     osc.start(start);
     osc.stop(start + dur + 0.02);
   }
@@ -149,7 +179,7 @@ export class Sound {
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(vol, start);
     gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-    src.connect(filter).connect(gain).connect(this.master!);
+    src.connect(filter).connect(gain).connect(this.sfxBus!);
     src.start(start);
     src.stop(start + dur);
   }

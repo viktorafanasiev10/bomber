@@ -8,8 +8,9 @@ import { Tile, type Grid } from '../core/grid';
 import { SPEED_STEP, type Item } from '../core/items';
 import { BASE_SPEED, DIR_VEC, type Player } from '../core/player';
 import { Controls, wantsTouchControls } from '../input/controls';
-import { loadHighScore, submitScore } from '../storage';
+import { loadHighScore, loadSettings, submitScore } from '../storage';
 import { COLORS, HEIGHT, HUD_HEIGHT, TILE, WIDTH } from './config';
+import { DIFFICULTY_LABEL, ENEMY_LABEL } from './SettingsScene';
 
 /** Longest frame we simulate; avoids a burst of catch-up ticks after a stall. */
 const MAX_FRAME = 0.25;
@@ -19,6 +20,7 @@ const CONTROLS_HINT = TOUCH
   ? 'BOMB drops a bomb, BOOM sets off remote bombs'
   : 'Move: arrows / WASD    Bomb: Space    Detonate: Z\nPause: P / Esc    Mute: M';
 const RESTART_HINT = TOUCH ? 'Tap BOMB to play again' : 'Press Space to play again';
+const QUIT_LINK = TOUCH ? '[ Quit to title ]' : '[ Q: quit to title ]';
 
 export class GameScene extends Phaser.Scene {
   private campaign!: Campaign;
@@ -34,6 +36,7 @@ export class GameScene extends Phaser.Scene {
   private overlayBg!: Phaser.GameObjects.Rectangle;
   private overlayTitle!: Phaser.GameObjects.Text;
   private overlaySub!: Phaser.GameObjects.Text;
+  private overlayLink!: Phaser.GameObjects.Text;
   private drawnGrid?: Grid;
   private drawnVersion = -1;
   /** Dead enemies that already got a score popup. */
@@ -55,15 +58,23 @@ export class GameScene extends Phaser.Scene {
     this.flamesGfx = this.add.graphics({ y: HUD_HEIGHT });
     this.createOverlay();
     this.controls = new Controls(this);
+    // The scene object is reused each time it starts, so reset per-run state here.
     this.paused = false;
-    // Any key counts as the gesture browsers need before audio can play.
-    this.input.keyboard?.on('keydown', () => sound.unlock());
-    this.game.events.on('blur', () => this.setPaused(true));
-    this.events.once('shutdown', () => sound.stopMusic());
+    this.newRecord = false;
+    this.accumulator = 0;
+    this.drawnGrid = undefined;
+    this.popped = new WeakSet();
+
+    const autoPause = () => this.setPaused(true);
+    this.game.events.on('blur', autoPause);
+    this.events.once('shutdown', () => {
+      this.game.events.off('blur', autoPause);
+      sound.stopMusic();
+    });
 
     // `?seed=123` in the URL pins every stage's layout, handy for testing and sharing.
     const seed = Number(new URLSearchParams(location.search).get('seed')) || Date.now();
-    this.campaign = new Campaign(seed);
+    this.campaign = new Campaign(seed, loadSettings());
     // Dev-only handle for poking at state from the console.
     if (import.meta.env.DEV) Object.assign(window, { scene: this });
   }
@@ -71,6 +82,7 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, deltaMs: number): void {
     if (this.controls.consume('mute')) sound.toggleMute();
     if (this.controls.consume('pause')) this.setPaused(!this.paused);
+    if (this.controls.consume('quit') && this.canQuit()) return this.quit();
 
     if (this.paused) {
       this.controls.read(); // drop presses made while paused
@@ -106,6 +118,14 @@ export class GameScene extends Phaser.Scene {
     this.updateOverlay();
   }
 
+  private canQuit(): boolean {
+    return this.paused || this.campaign.phase === 'gameover';
+  }
+
+  private quit(): void {
+    this.scene.start('title');
+  }
+
   private setPaused(paused: boolean): void {
     // Only gameplay can be paused; menus and transitions just run.
     if (paused && this.campaign.phase !== 'playing') return;
@@ -132,7 +152,7 @@ export class GameScene extends Phaser.Scene {
           sound.stopMusic();
           break;
         case 'game-over':
-          this.newRecord = submitScore(this.campaign.score);
+          this.newRecord = submitScore(this.campaign.score, this.campaign.run);
           break;
       }
     }
@@ -156,13 +176,20 @@ export class GameScene extends Phaser.Scene {
       this.overlayBg.setFillStyle(COLORS.overlay, alpha);
       this.overlayTitle.setText(title);
       this.overlaySub.setText(sub);
+      this.overlayLink.setVisible(this.canQuit());
     };
 
     switch (c.phase) {
       case 'intro':
         show(
           `STAGE ${c.stage}`,
-          `Lives ${c.lives}\n\nClear every enemy, then find the exit\n\n${CONTROLS_HINT}`,
+          [
+            `Lives ${c.lives}    ${DIFFICULTY_LABEL[c.run.difficulty]} · Enemies: ${ENEMY_LABEL[c.run.enemies]}`,
+            '',
+            c.run.enemies === 'none' ? 'Blast the blocks and find the exit' : 'Clear every enemy, then find the exit',
+            '',
+            CONTROLS_HINT,
+          ].join('\n'),
           1,
         );
         break;
@@ -172,7 +199,7 @@ export class GameScene extends Phaser.Scene {
       case 'gameover':
         show(
           'GAME OVER',
-          `${this.newRecord ? 'NEW HIGH SCORE!' : `High score ${loadHighScore()}`}\nScore ${c.score}\n\n${RESTART_HINT}`,
+          `${this.newRecord ? 'NEW HIGH SCORE!' : `High score ${loadHighScore(c.run)}`}\nScore ${c.score}\n\n${RESTART_HINT}`,
           0.85,
         );
         break;
@@ -237,8 +264,13 @@ export class GameScene extends Phaser.Scene {
         lineSpacing: 4,
       })
       .setOrigin(0.5, 0);
+    this.overlayLink = this.add
+      .text(WIDTH / 2, h - 60, QUIT_LINK, { fontFamily: 'monospace', fontSize: '18px', color: COLORS.menuActive })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.canQuit() && this.quit());
     this.overlay = this.add
-      .container(0, HUD_HEIGHT, [this.overlayBg, this.overlayTitle, this.overlaySub])
+      .container(0, HUD_HEIGHT, [this.overlayBg, this.overlayTitle, this.overlaySub, this.overlayLink])
       .setDepth(20);
   }
 

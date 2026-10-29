@@ -16,6 +16,7 @@ const BOMB_KEYS = new Set(['Space', 'KeyX', 'KeyJ', 'Enter']);
 const DETONATE_KEYS = new Set(['KeyZ', 'KeyK', 'ShiftLeft', 'ShiftRight']);
 const PAUSE_KEYS = new Set(['KeyP', 'Escape']);
 const MUTE_KEYS = new Set(['KeyM']);
+const QUIT_KEYS = new Set(['KeyQ']);
 
 // Standard gamepad mapping.
 const PAD_DPAD: [number, Dir][] = [
@@ -27,9 +28,10 @@ const PAD_DPAD: [number, Dir][] = [
 const PAD_BOMB = [0, 2]; // A / X
 const PAD_DETONATE = [1, 3]; // B / Y
 const PAD_PAUSE = 9; // Start
+const PAD_QUIT = 8; // Select / Back
 const STICK_DEADZONE = 0.5;
 
-export type UiAction = 'pause' | 'mute';
+export type UiAction = 'pause' | 'mute' | 'quit';
 
 /** Phones and tablets get on-screen buttons; `?touch=1` forces them for testing. */
 export function wantsTouchControls(): boolean {
@@ -61,6 +63,7 @@ export class Controls {
         if (DETONATE_KEYS.has(e.code)) this.detonateQueued = true;
         if (PAUSE_KEYS.has(e.code)) this.actions.add('pause');
         if (MUTE_KEYS.has(e.code)) this.actions.add('mute');
+        if (QUIT_KEYS.has(e.code)) this.actions.add('quit');
       });
       kb.on('keyup', (e: KeyboardEvent) => {
         const dir = DIR_KEYS[e.code];
@@ -68,7 +71,9 @@ export class Controls {
       });
     }
     // Avoid stuck keys when the tab loses focus mid-press.
-    scene.game.events.on('blur', () => (this.held = []));
+    const release = () => (this.held = []);
+    scene.game.events.on('blur', release);
+    scene.events.once('shutdown', () => scene.game.events.off('blur', release));
     this.bindTouch(scene);
   }
 
@@ -81,7 +86,12 @@ export class Controls {
     requestAnimationFrame(() => scene.scale.refresh());
 
     const abort = new AbortController();
-    scene.events.once('shutdown', () => abort.abort());
+    scene.events.once('shutdown', () => {
+      abort.abort();
+      // Menus don't use the on-screen pad; give the canvas the whole screen back.
+      document.body.classList.remove('touch');
+      requestAnimationFrame(() => scene.scale.refresh());
+    });
     const opts = { signal: abort.signal };
 
     const pad = root.querySelector<HTMLElement>('.dpad-pad')!;
@@ -146,6 +156,7 @@ export class Controls {
     if (PAD_BOMB.some(justPressed)) this.bombQueued = true;
     if (PAD_DETONATE.some(justPressed)) this.detonateQueued = true;
     if (justPressed(PAD_PAUSE)) this.actions.add('pause');
+    if (justPressed(PAD_QUIT)) this.actions.add('quit');
     this.padPrev = pressed;
 
     this.padDir = PAD_DPAD.find(([i]) => pressed.has(i))?.[1] ?? null;

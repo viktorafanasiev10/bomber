@@ -1,10 +1,11 @@
+import { DEFAULT_RUN, DIFFICULTY, type RunSettings } from './difficulty';
 import { Game, TICK, type GameEvent } from './game';
 import type { PlayerStats } from './items';
 import type { PlayerInput } from './player';
-import { BASE_SPEED } from './player';
 import { stageConfig } from './stages';
 
-export const START_LIVES = 3;
+/** Lives on Normal. */
+export const START_LIVES = DIFFICULTY.normal.lives;
 /** Seconds for each between-stage phase. */
 export const INTRO_TIME = 2;
 export const DEATH_TIME = 2;
@@ -13,17 +14,17 @@ export const TIME_BONUS_PER_SECOND = 10;
 
 export type Phase = 'intro' | 'playing' | 'dying' | 'cleared' | 'gameover';
 
-const START_STATS: PlayerStats = { maxBombs: 1, range: 2, speed: BASE_SPEED, kick: false, remote: false };
 const IDLE: PlayerInput = { dir: null, bomb: false };
 
 /** A run of stages: lives, banked score, carried-over power-ups and phase flow. */
 export class Campaign {
   readonly seed: number;
+  readonly run: RunSettings;
   stage = 1;
-  lives = START_LIVES;
+  lives: number;
   /** Score from finished stages; the live total adds the current stage's score. */
   bankedScore = 0;
-  stats: PlayerStats = { ...START_STATS };
+  stats: PlayerStats;
   phase: Phase = 'intro';
   /** Seconds spent in the current phase. */
   phaseTime = 0;
@@ -31,8 +32,11 @@ export class Campaign {
   game: Game;
   private events: GameEvent[] = [];
 
-  constructor(seed: number) {
+  constructor(seed: number, run: RunSettings = DEFAULT_RUN) {
     this.seed = seed;
+    this.run = run;
+    this.lives = DIFFICULTY[run.difficulty].lives;
+    this.stats = { ...DIFFICULTY[run.difficulty].startStats };
     this.game = this.buildStage();
   }
 
@@ -100,9 +104,9 @@ export class Campaign {
 
   private reset(): void {
     this.stage = 1;
-    this.lives = START_LIVES;
+    this.lives = DIFFICULTY[this.run.difficulty].lives;
     this.bankedScore = 0;
-    this.stats = { ...START_STATS };
+    this.stats = { ...DIFFICULTY[this.run.difficulty].startStats };
     this.restartStage();
   }
 
@@ -113,7 +117,10 @@ export class Campaign {
 
   /** The same stage always has the same layout for a given campaign seed. */
   private buildStage(): Game {
-    return new Game(this.seed + this.stage * 1000, { stage: stageConfig(this.stage), stats: this.stats });
+    return new Game(this.seed + this.stage * 1000, {
+      stage: stageConfig(this.stage, this.run),
+      stats: this.stats,
+    });
   }
 
   private setPhase(phase: Phase): void {

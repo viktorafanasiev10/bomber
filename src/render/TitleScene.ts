@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
 import { sound } from '../audio/sound';
 import { wantsTouchControls } from '../input/controls';
-import { loadHighScore } from '../storage';
+import { loadHighScore, loadSettings } from '../storage';
 import { COLORS, HEIGHT, WIDTH } from './config';
+import { Menu } from './Menu';
+import { DIFFICULTY_LABEL, ENEMY_LABEL } from './SettingsScene';
 
 export class TitleScene extends Phaser.Scene {
-  private padPrev = false;
+  private menu!: Menu;
 
   constructor() {
     super('title');
@@ -35,43 +37,41 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const prompt = this.add
-      .text(cx, 380, wantsTouchControls() ? 'Tap to start' : 'Press Space or Enter to start', {
-        fontFamily: 'monospace',
-        fontSize: '22px',
-        color: COLORS.hudText,
-      })
-      .setOrigin(0.5);
-    this.tweens.add({ targets: prompt, alpha: 0.25, duration: 600, yoyo: true, repeat: -1 });
+    const settings = loadSettings();
+    this.menu = new Menu(this, cx, 370, [
+      { label: () => 'START GAME', select: () => this.start() },
+      { label: () => 'SETTINGS', select: () => this.scene.start('settings') },
+    ]);
 
     this.add
-      .text(cx, 440, `HIGH SCORE  ${loadHighScore()}`, {
+      .text(cx, 460, `${DIFFICULTY_LABEL[settings.difficulty]} · Enemies: ${ENEMY_LABEL[settings.enemies]}`, {
+        fontFamily: 'monospace',
+        fontSize: '15px',
+        color: COLORS.hudHint,
+      })
+      .setOrigin(0.5);
+    this.add
+      .text(cx, 488, `HIGH SCORE  ${loadHighScore(settings)}`, {
         fontFamily: 'monospace',
         fontSize: '20px',
         color: '#ffc400',
       })
       .setOrigin(0.5);
 
-    this.add
-      .text(
-        cx,
-        520,
-        'Move: arrows / WASD     Bomb: Space     Detonate: Z\nPause: P / Esc     Mute: M\nGamepad: d-pad or stick, A bomb, B detonate, Start pause',
-        { fontFamily: 'monospace', fontSize: '15px', color: COLORS.hudHint, align: 'center', lineSpacing: 6 },
-      )
-      .setOrigin(0.5, 0);
-
-    this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'Enter') this.start();
-    });
-    this.input.on('pointerdown', () => this.start());
+    if (!wantsTouchControls()) {
+      this.add
+        .text(
+          cx,
+          545,
+          'Move: arrows / WASD     Bomb: Space     Detonate: Z\nPause: P / Esc     Mute: M\nGamepad: d-pad or stick, A bomb, B detonate, Start pause',
+          { fontFamily: 'monospace', fontSize: '14px', color: COLORS.hudHint, align: 'center', lineSpacing: 6 },
+        )
+        .setOrigin(0.5, 0);
+    }
   }
 
   update(): void {
-    const pad = navigator.getGamepads?.().find((p) => p?.connected);
-    const pressed = !!pad && [0, 9].some((i) => pad.buttons[i]?.pressed);
-    if (pressed && !this.padPrev) this.start();
-    this.padPrev = pressed;
+    this.menu.update();
   }
 
   private start(): void {

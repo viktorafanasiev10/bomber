@@ -62,9 +62,10 @@ export class Enemy {
   /** Seconds since death (0 while alive). */
   deadFor = 0;
 
-  constructor(kind: EnemyKind, tile: Point, dir: Dir = 'left') {
+  constructor(kind: EnemyKind, tile: Point, dir: Dir = 'left', speedScale = 1) {
     this.kind = kind;
-    this.stats = ENEMY_STATS[kind];
+    const stats = ENEMY_STATS[kind];
+    this.stats = speedScale === 1 ? stats : { ...stats, speed: stats.speed * speedScale };
     this.x = tile.x;
     this.y = tile.y;
     this.dir = dir;
@@ -144,7 +145,12 @@ function pick<T>(items: T[], rng: Rng): T {
 }
 
 /** Places enemies on random empty tiles at least `minDistance` (Manhattan) from the spawn. */
-export function spawnEnemies(grid: Grid, kinds: EnemyKind[], rng: Rng, minDistance = 5): Enemy[] {
+export function spawnEnemies(
+  grid: Grid,
+  kinds: EnemyKind[],
+  rng: Rng,
+  { speedScale = 1, minDistance = 5 } = {},
+): Enemy[] {
   const free: Point[] = [];
   grid.forEach((_, x, y) => {
     const dist = Math.abs(x - PLAYER_SPAWN.x) + Math.abs(y - PLAYER_SPAWN.y);
@@ -155,7 +161,7 @@ export function spawnEnemies(grid: Grid, kinds: EnemyKind[], rng: Rng, minDistan
   for (const kind of kinds) {
     if (!free.length) break;
     const [tile] = free.splice(Math.floor(rng() * free.length), 1);
-    enemies.push(new Enemy(kind, tile, pick(DIRS, rng)));
+    enemies.push(new Enemy(kind, tile, pick(DIRS, rng), speedScale));
   }
   return enemies;
 }

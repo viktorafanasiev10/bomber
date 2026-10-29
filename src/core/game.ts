@@ -69,14 +69,14 @@ export class Game {
 
   constructor(seedOrGrid: number | Grid, opts: GameOptions = {}) {
     const generated = typeof seedOrGrid === 'number';
-    const empty: StageConfig = { enemies: [], powerUps: [], softDensity: 0, time: Infinity };
+    const empty: StageConfig = { enemies: [], powerUps: [], softDensity: 0, time: Infinity, enemySpeed: 1 };
     const stage = { ...(generated ? stageConfig(1) : empty), ...opts.stage };
 
     this.rng = createRng(generated ? seedOrGrid : (opts.seed ?? 1));
     this.grid = generated ? generateLevel(this.rng, { softDensity: stage.softDensity }) : seedOrGrid;
     this.player = new Player(PLAYER_SPAWN);
     if (opts.stats) Object.assign(this.player, opts.stats);
-    this.enemies = spawnEnemies(this.grid, stage.enemies, this.rng);
+    this.enemies = spawnEnemies(this.grid, stage.enemies, this.rng, { speedScale: stage.enemySpeed });
     const itemKinds: ItemKind[] = generated ? ['exit', ...stage.powerUps] : stage.powerUps;
     this.hidden = hideItems(this.grid, itemKinds, this.rng);
     this.timeLeft = stage.time;
