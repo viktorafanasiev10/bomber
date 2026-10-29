@@ -24,3 +24,9 @@ sound.configure(loadSettings());
 
 // Browsers only allow audio after a user gesture: unlock on the first touch or key.
 for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => sound.unlock());
+
+// iOS Safari (and every iPad browser, which share its engine) still pinch-zooms despite the
+// viewport meta tag; its non-standard gesture events are the only way to stop that.
+for (const type of ['gesturestart', 'gesturechange', 'dblclick'] as const) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
