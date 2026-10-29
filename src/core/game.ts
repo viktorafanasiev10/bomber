@@ -7,20 +7,27 @@ import {
   type Burning,
   type Explosion,
 } from './bomb';
-import { CONTACT_DISTANCE, ENEMY_DEATH_TIME, spawnEnemies, type Enemy, type EnemyKind } from './enemy';
+import { CONTACT_DISTANCE, ENEMY_DEATH_TIME, spawnEnemies, type Enemy } from './enemy';
 import { Tile, type Grid } from './grid';
+import { applyPowerUp, hideItems, tileKey, type Item, type ItemKind, type PlayerStats } from './items';
 import { generateLevel, PLAYER_SPAWN } from './level';
 import { Player, type PlayerInput } from './player';
 import { createRng, type Rng } from './rng';
+import { stageConfig, type StageConfig } from './stages';
 
 /** Fixed simulation step, in seconds. */
 export const TICK = 1 / 60;
 
-export const STAGE_ENEMIES: EnemyKind[] = ['balloom', 'balloom', 'balloom', 'balloom', 'onil', 'onil'];
+export const POINTS_PER_POWER_UP = 1000;
 
 export interface GameOptions {
-  /** Defaults to STAGE_ENEMIES for generated levels and none for a supplied grid. */
-  enemies?: EnemyKind[];
+  /**
+   * Generated levels default to stage 1. A supplied grid (tests) defaults to no
+   * enemies, no hidden items and no time limit.
+   */
+  stage?: Partial<StageConfig>;
+  /** Player stats carried over from earlier stages or lives. */
+  stats?: PlayerStats;
   /** RNG seed when a grid is supplied (otherwise the level seed is used). */
   seed?: number;
 }
@@ -36,13 +43,28 @@ export class Game {
   burning: Burning[] = [];
   /** Seconds since the player died (0 while alive). */
   deadFor = 0;
+  /** Seconds left on the clock; reaching 0 kills the player. */
+  timeLeft: number;
+  /** Items still under soft blocks, by tile key. */
+  hidden: Map<string, ItemKind>;
+  /** Items lying on the floor. */
+  items: Item[] = [];
+  /** The player walked into the open exit. */
+  exited = false;
 
   constructor(seedOrGrid: number | Grid, opts: GameOptions = {}) {
     const generated = typeof seedOrGrid === 'number';
+    const empty: StageConfig = { enemies: [], powerUps: [], softDensity: 0, time: Infinity };
+    const stage = { ...(generated ? stageConfig(1) : empty), ...opts.stage };
+
     this.rng = createRng(generated ? seedOrGrid : (opts.seed ?? 1));
-    this.grid = generated ? generateLevel(this.rng) : seedOrGrid;
+    this.grid = generated ? generateLevel(this.rng, { softDensity: stage.softDensity }) : seedOrGrid;
     this.player = new Player(PLAYER_SPAWN);
-    this.enemies = spawnEnemies(this.grid, opts.enemies ?? (generated ? STAGE_ENEMIES : []), this.rng);
+    if (opts.stats) Object.assign(this.player, opts.stats);
+    this.enemies = spawnEnemies(this.grid, stage.enemies, this.rng);
+    const itemKinds: ItemKind[] = generated ? ['exit', ...stage.powerUps] : stage.powerUps;
+    this.hidden = hideItems(this.grid, itemKinds, this.rng);
+    this.timeLeft = stage.time;
   }
 
   /** All enemies defeated. */
@@ -50,11 +72,22 @@ export class Game {
     return this.enemies.every((e) => !e.alive);
   }
 
+  get stats(): PlayerStats {
+    const { maxBombs, range, speed } = this.player;
+    return { maxBombs, range, speed };
+  }
+
+  itemAt(x: number, y: number): Item | undefined {
+    return this.items.find((i) => i.x === x && i.y === y);
+  }
+
   step(input: PlayerInput): void {
     const p = this.player;
+    if (this.exited) return;
     if (p.alive) {
       p.update(TICK, input, (x, y) => this.isBlocked(x, y));
       if (input.bomb) this.placeBomb();
+      this.timeLeft = Math.max(0, this.timeLeft - TICK);
     } else {
       this.deadFor += TICK;
     }
@@ -62,8 +95,28 @@ export class Game {
     this.updateBombs();
     this.updateFlames();
     this.updateEnemies();
+    this.updateItems();
 
-    if (p.alive && (this.isOnFire(p.tile.x, p.tile.y) || this.touchesEnemy())) p.alive = false;
+    if (p.alive && (this.isOnFire(p.tile.x, p.tile.y) || this.touchesEnemy() || this.timeLeft <= 0)) {
+      p.alive = false;
+    }
+  }
+
+  private updateItems(): void {
+    // Flames destroy exposed power-ups (the exit door survives).
+    this.items = this.items.filter((i) => i.kind === 'exit' || !this.isOnFire(i.x, i.y));
+
+    const p = this.player;
+    if (!p.alive) return;
+    const item = this.itemAt(p.tile.x, p.tile.y);
+    if (!item) return;
+    if (item.kind === 'exit') {
+      this.exited = this.cleared;
+    } else {
+      applyPowerUp(p, item.kind);
+      this.score += POINTS_PER_POWER_UP;
+      this.items = this.items.filter((i) => i !== item);
+    }
   }
 
   private updateEnemies(): void {
@@ -146,7 +199,13 @@ export class Game {
 
     for (const c of this.burning) {
       c.timeLeft -= TICK;
-      if (c.timeLeft <= 0) this.grid.set(c.x, c.y, Tile.Empty);
+      if (c.timeLeft > 0) continue;
+      this.grid.set(c.x, c.y, Tile.Empty);
+      const kind = this.hidden.get(tileKey(c));
+      if (kind) {
+        this.hidden.delete(tileKey(c));
+        this.items.push({ x: c.x, y: c.y, kind });
+      }
     }
     this.burning = this.burning.filter((c) => c.timeLeft > 0);
   }

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ENEMY_DEATH_TIME, ENEMY_STATS, Enemy, spawnEnemies, type EnemyContext } from './enemy';
-import { Game, STAGE_ENEMIES, TICK } from './game';
+import { Game, TICK } from './game';
 import { Grid, Tile } from './grid';
 import { generateLevel, isSafeZone } from './level';
 import { createRng } from './rng';
+import { stageConfig } from './stages';
+
+const STAGE_ENEMIES = stageConfig(1).enemies;
 
 const idle = { dir: null, bomb: false };
 

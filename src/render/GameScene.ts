@@ -1,32 +1,36 @@
 import Phaser from 'phaser';
 import { BURN_TIME, FLAME_TIME, FUSE_TIME, type Bomb, type Burning, type FlameCell } from '../core/bomb';
+import { Campaign, DEATH_TIME } from '../core/campaign';
 import { ENEMY_DEATH_TIME, type Enemy } from '../core/enemy';
-import { Game, TICK } from '../core/game';
-import { Tile } from '../core/grid';
-import type { Player } from '../core/player';
+import { TICK } from '../core/game';
+import { Tile, type Grid } from '../core/grid';
+import { SPEED_STEP, type Item } from '../core/items';
+import { BASE_SPEED, type Player } from '../core/player';
 import { KeyboardInput } from '../input/keyboard';
-import { COLORS, HUD_HEIGHT, TILE, WIDTH } from './config';
+import { COLORS, HEIGHT, HUD_HEIGHT, TILE, WIDTH } from './config';
 
 /** Longest frame we simulate; avoids a burst of catch-up ticks after a stall. */
 const MAX_FRAME = 0.25;
-/** Seconds to show the death animation before restarting the stage. */
-const RESTART_DELAY = 2;
+const LOW_TIME = 30;
 
 export class GameScene extends Phaser.Scene {
-  private state!: Game;
+  private campaign!: Campaign;
   private controls!: KeyboardInput;
   private map!: Phaser.GameObjects.Graphics;
   private bombsGfx!: Phaser.GameObjects.Graphics;
   private playerGfx!: Phaser.GameObjects.Graphics;
   private flamesGfx!: Phaser.GameObjects.Graphics;
   private enemiesGfx!: Phaser.GameObjects.Graphics;
-  private hudText!: Phaser.GameObjects.Text;
-  private mapVersion = -1;
-  private shownScore = -1;
+  private hudLeft!: Phaser.GameObjects.Text;
+  private hudRight!: Phaser.GameObjects.Text;
+  private overlay!: Phaser.GameObjects.Container;
+  private overlayBg!: Phaser.GameObjects.Rectangle;
+  private overlayTitle!: Phaser.GameObjects.Text;
+  private overlaySub!: Phaser.GameObjects.Text;
+  private drawnGrid?: Grid;
+  private drawnVersion = -1;
   /** Dead enemies that already got a score popup. */
   private popped = new WeakSet<Enemy>();
-  /** `?seed=123` in the URL pins the map, handy for testing and sharing a layout. */
-  private seed = Number(new URLSearchParams(location.search).get('seed')) || Date.now();
   private accumulator = 0;
 
   constructor() {
@@ -40,52 +44,82 @@ export class GameScene extends Phaser.Scene {
     this.enemiesGfx = this.add.graphics({ y: HUD_HEIGHT });
     this.playerGfx = this.add.graphics();
     this.flamesGfx = this.add.graphics({ y: HUD_HEIGHT });
+    this.createOverlay();
     this.controls = new KeyboardInput(this);
-    this.newLevel();
 
-    this.input.keyboard?.on('keydown-R', () => {
-      this.seed++;
-      this.newLevel();
-    });
+    // `?seed=123` in the URL pins every stage's layout, handy for testing and sharing.
+    const seed = Number(new URLSearchParams(location.search).get('seed')) || Date.now();
+    this.campaign = new Campaign(seed);
+    // Dev-only handle for poking at state from the console.
+    if (import.meta.env.DEV) Object.assign(window, { scene: this });
   }
 
   update(_time: number, deltaMs: number): void {
     this.accumulator += Math.min(deltaMs / 1000, MAX_FRAME);
     while (this.accumulator >= TICK) {
-      this.state.step(this.controls.read());
+      this.campaign.step(this.controls.read());
       this.accumulator -= TICK;
     }
-    if (this.state.deadFor >= RESTART_DELAY) this.newLevel();
 
-    const { grid, bombs, burning, explosions, player } = this.state;
+    const game = this.campaign.game;
     const now = this.time.now;
-    if (grid.version !== this.mapVersion) this.drawGrid();
+    if (game.grid !== this.drawnGrid || game.grid.version !== this.drawnVersion) this.drawGrid(game.grid);
 
     this.bombsGfx.clear();
-    for (const c of burning) drawBurning(this.bombsGfx, c, now);
-    for (const b of bombs) drawBomb(this.bombsGfx, b, now);
+    for (const item of game.items) drawItem(this.bombsGfx, item, game.cleared, now);
+    for (const c of game.burning) drawBurning(this.bombsGfx, c, now);
+    for (const b of game.bombs) drawBomb(this.bombsGfx, b, now);
     this.enemiesGfx.clear();
-    for (const e of this.state.enemies) {
+    for (const e of game.enemies) {
       drawEnemy(this.enemiesGfx, e, now);
       if (!e.alive && !this.popped.has(e)) this.scorePopup(e);
     }
-    drawPlayer(this.playerGfx, player, now, this.state.deadFor);
-    if (this.state.score !== this.shownScore) this.updateHud();
+    drawPlayer(this.playerGfx, game.player, now, game.deadFor);
     this.flamesGfx.clear();
-    for (const e of explosions) {
+    for (const e of game.explosions) {
       for (const c of e.cells) drawFlame(this.flamesGfx, c, e.timeLeft);
     }
-  }
 
-  /** Restarts the current stage (until lives arrive, death just retries the same map). */
-  private newLevel(): void {
-    this.state = new Game(this.seed);
-    this.accumulator = 0;
+    this.updateHud();
+    this.updateOverlay();
   }
 
   private updateHud(): void {
-    this.shownScore = this.state.score;
-    this.hudText.setText(`STAGE 1   SCORE ${this.shownScore}   LIVES 3`);
+    const c = this.campaign;
+    const { player, timeLeft } = c.game;
+    const time = Number.isFinite(timeLeft) ? Math.ceil(timeLeft) : 0;
+    const speed = Math.round((player.speed - BASE_SPEED) / SPEED_STEP) + 1;
+    this.hudLeft.setText(`STAGE ${c.stage}   TIME ${String(time).padStart(3, ' ')}   SCORE ${c.score}`);
+    this.hudLeft.setColor(time <= LOW_TIME && c.phase === 'playing' ? COLORS.hudWarn : COLORS.hudText);
+    this.hudRight.setText(`LIVES ${c.lives}   BOMB ${player.maxBombs}  FIRE ${player.range}  SPEED ${speed}`);
+  }
+
+  private updateOverlay(): void {
+    const c = this.campaign;
+    const show = (title: string, sub: string, alpha: number) => {
+      this.overlay.setVisible(true);
+      this.overlayBg.setFillStyle(COLORS.overlay, alpha);
+      this.overlayTitle.setText(title);
+      this.overlaySub.setText(sub);
+    };
+
+    switch (c.phase) {
+      case 'intro':
+        show(
+          `STAGE ${c.stage}`,
+          `Lives ${c.lives}\n\nClear every enemy, then find the exit\nMove: arrows / WASD    Bomb: Space`,
+          1,
+        );
+        break;
+      case 'cleared':
+        show('STAGE CLEAR!', `Time bonus +${c.timeBonus}`, 0.6);
+        break;
+      case 'gameover':
+        show('GAME OVER', `Score ${c.score}\n\nPress Space to play again`, 0.85);
+        break;
+      default:
+        this.overlay.setVisible(false);
+    }
   }
 
   private scorePopup(e: Enemy): void {
@@ -113,26 +147,43 @@ export class GameScene extends Phaser.Scene {
 
   private drawHud(): void {
     this.add.rectangle(0, 0, WIDTH, HUD_HEIGHT, COLORS.hud).setOrigin(0);
-    this.hudText = this.add
-      .text(16, HUD_HEIGHT / 2, '', {
-        fontFamily: 'monospace',
-        fontSize: '20px',
-        color: COLORS.hudText,
-      })
-      .setOrigin(0, 0.5);
-    this.add
-      .text(WIDTH - 16, HUD_HEIGHT / 2, 'Move: arrows/WASD  Bomb: Space  R: new map', {
-        fontFamily: 'monospace',
-        fontSize: '13px',
-        color: COLORS.hudHint,
-      })
-      .setOrigin(1, 0.5);
+    const style = { fontFamily: 'monospace', fontSize: '16px', color: COLORS.hudText };
+    this.hudLeft = this.add.text(14, HUD_HEIGHT / 2, '', style).setOrigin(0, 0.5);
+    this.hudRight = this.add.text(WIDTH - 14, HUD_HEIGHT / 2, '', style).setOrigin(1, 0.5);
   }
 
-  private drawGrid(): void {
-    this.mapVersion = this.state.grid.version;
+  private createOverlay(): void {
+    const h = HEIGHT - HUD_HEIGHT;
+    this.overlayBg = this.add.rectangle(0, 0, WIDTH, h, COLORS.overlay).setOrigin(0);
+    this.overlayTitle = this.add
+      .text(WIDTH / 2, h / 2 - 50, '', {
+        fontFamily: 'monospace',
+        fontSize: '44px',
+        fontStyle: 'bold',
+        color: COLORS.hudText,
+        stroke: '#000000',
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5);
+    this.overlaySub = this.add
+      .text(WIDTH / 2, h / 2 + 30, '', {
+        fontFamily: 'monospace',
+        fontSize: '18px',
+        color: COLORS.hudText,
+        align: 'center',
+        lineSpacing: 4,
+      })
+      .setOrigin(0.5, 0);
+    this.overlay = this.add
+      .container(0, HUD_HEIGHT, [this.overlayBg, this.overlayTitle, this.overlaySub])
+      .setDepth(20);
+  }
+
+  private drawGrid(grid: Grid): void {
+    this.drawnGrid = grid;
+    this.drawnVersion = grid.version;
     const g = this.map.clear();
-    this.state.grid.forEach((tile, x, y) => {
+    grid.forEach((tile, x, y) => {
       const px = x * TILE;
       const py = y * TILE;
       switch (tile) {
@@ -176,7 +227,7 @@ function drawPlayer(g: Phaser.GameObjects.Graphics, p: Player, now: number, dead
   const bob = p.moving ? Math.abs(Math.sin(now / 70)) * 3 : 0;
   g.clear().setPosition(p.x * TILE, HUD_HEIGHT + p.y * TILE - bob);
   // Death: flash, then shrink away.
-  const dying = Math.min(deadFor / (RESTART_DELAY * 0.6), 1);
+  const dying = Math.min(deadFor / (DEATH_TIME * 0.6), 1);
   g.setAlpha(p.alive ? 1 : (1 - dying) * (Math.floor(now / 80) % 2 ? 1 : 0.4));
 
   const cx = TILE / 2;
@@ -290,5 +341,41 @@ function drawEnemy(g: Phaser.GameObjects.Graphics, e: Enemy, now: number): void 
   for (const side of [-1, 1]) {
     g.fillStyle(0xffffff).fillCircle(cx + side * ex, cy - r * 0.05, r * 0.26);
     g.fillStyle(COLORS.playerEye).fillCircle(cx + side * ex + lookX * r * 0.1, cy - r * 0.05 + lookY * r * 0.1, r * 0.12);
+  }
+}
+
+function drawItem(g: Phaser.GameObjects.Graphics, item: Item, open: boolean, now: number): void {
+  const px = item.x * TILE;
+  const py = item.y * TILE;
+  const m = 5;
+
+  if (item.kind === 'exit') {
+    g.fillStyle(COLORS.exitFrame).fillRect(px + m, py + m, TILE - 2 * m, TILE - 2 * m);
+    if (open) {
+      const glow = 0.6 + 0.4 * Math.sin(now / 150);
+      g.fillStyle(COLORS.exitOpen, glow).fillRect(px + m + 5, py + m + 5, TILE - 2 * m - 10, TILE - 2 * m - 5);
+    } else {
+      g.fillStyle(COLORS.exitDoor).fillRect(px + m + 5, py + m + 5, TILE - 2 * m - 10, TILE - 2 * m - 5);
+      g.fillStyle(COLORS.exitFrame).fillCircle(px + TILE - m - 11, py + TILE / 2 + 3, 2);
+    }
+    return;
+  }
+
+  // Power-ups blink gently so they read as pickups, not floor.
+  const bg = { bomb: COLORS.puBomb, fire: COLORS.puFire, speed: COLORS.puSpeed }[item.kind];
+  g.fillStyle(0x000000, 0.35).fillRoundedRect(px + m + 2, py + m + 3, TILE - 2 * m, TILE - 2 * m, 6);
+  g.fillStyle(bg, Math.floor(now / 250) % 2 ? 1 : 0.85).fillRoundedRect(px + m, py + m, TILE - 2 * m, TILE - 2 * m, 6);
+  const cx = px + TILE / 2;
+  const cy = py + TILE / 2;
+  if (item.kind === 'bomb') {
+    g.fillStyle(COLORS.bomb).fillCircle(cx, cy + 2, 9);
+    g.fillStyle(COLORS.bombFuse).fillRect(cx + 4, cy - 11, 3, 6);
+    g.fillStyle(COLORS.bombShine).fillCircle(cx - 3, cy - 1, 2);
+  } else if (item.kind === 'fire') {
+    g.fillStyle(COLORS.flameOuter).fillCircle(cx, cy + 4, 8).fillTriangle(cx - 8, cy + 3, cx + 8, cy + 3, cx, cy - 13);
+    g.fillStyle(COLORS.flameMid).fillCircle(cx, cy + 6, 4).fillTriangle(cx - 4, cy + 5, cx + 4, cy + 5, cx, cy - 4);
+  } else {
+    g.fillStyle(0xffffff);
+    for (const dx of [-7, 3]) g.fillTriangle(cx + dx, cy - 9, cx + dx + 8, cy, cx + dx, cy + 9);
   }
 }
