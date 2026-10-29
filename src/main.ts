@@ -1,12 +1,16 @@
 import Phaser from 'phaser';
 import { sound } from './audio/sound';
+import { wantsTouchControls } from './input/controls';
 import { GameScene } from './render/GameScene';
 import { SettingsScene } from './render/SettingsScene';
 import { TitleScene } from './render/TitleScene';
 import { loadSettings } from './storage';
 import { HEIGHT, WIDTH } from './render/config';
 
-new Phaser.Game({
+// Touch layout is decided once, before the canvas is sized, and never toggled afterwards.
+if (wantsTouchControls()) document.body.classList.add('touch');
+
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   width: WIDTH,
@@ -25,8 +29,6 @@ sound.configure(loadSettings());
 // Browsers only allow audio after a user gesture: unlock on the first touch or key.
 for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => sound.unlock());
 
-// iOS Safari (and every iPad browser, which share its engine) still pinch-zooms despite the
-// viewport meta tag; its non-standard gesture events are the only way to stop that.
-for (const type of ['gesturestart', 'gesturechange', 'dblclick'] as const) {
-  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
-}
+// Refit the canvas whenever its container changes size: window resizes, rotation, mobile
+// browser toolbars showing or hiding. Phaser only listens to window resize events by itself.
+new ResizeObserver(() => game.scale.refresh()).observe(document.getElementById('game')!);

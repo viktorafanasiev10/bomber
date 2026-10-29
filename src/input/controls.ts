@@ -81,16 +81,13 @@ export class Controls {
   private bindTouch(scene: Phaser.Scene): void {
     const root = document.getElementById('touch');
     if (!root || !wantsTouchControls()) return;
-    document.body.classList.add('touch');
-    // The canvas container just changed size.
-    requestAnimationFrame(() => scene.scale.refresh());
+    // Only shows the buttons; the layout itself is fixed at startup (see main.ts).
+    document.body.classList.add('in-game');
 
     const abort = new AbortController();
     scene.events.once('shutdown', () => {
       abort.abort();
-      // Menus don't use the on-screen pad; give the canvas the whole screen back.
-      document.body.classList.remove('touch');
-      requestAnimationFrame(() => scene.scale.refresh());
+      document.body.classList.remove('in-game');
     });
     const opts = { signal: abort.signal };
 

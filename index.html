@@ -8,9 +8,11 @@
     <style>
       html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
       body { height: 100dvh; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-      /* A game page never needs panning or zooming; this also stops double-tap zoom on iOS,
-         which ignores user-scalable=no. */
-      html, body { touch-action: none; overscroll-behavior: none; }
+      /* No double-tap zoom (iOS ignores user-scalable=no); pinch still works as an escape hatch. */
+      html, body { touch-action: manipulation; overscroll-behavior: none; }
+      /* The canvas must never influence its container's size, or Phaser's fit-to-parent
+         can feed back on itself and keep growing the canvas. */
+      #game { contain: strict; overflow: hidden; }
       #game { width: 100%; height: 100%; }
       #touch { display: none; }
 
@@ -27,6 +29,8 @@
       }
       body.touch #game { grid-area: game; height: auto; min-height: 0; min-width: 0; }
       body.touch #touch { display: contents; }
+      /* Menus keep the same layout (so the canvas never resizes between screens) but hide the pad. */
+      body.touch:not(.in-game) .dpad > *, body.touch:not(.in-game) .actions > * { visibility: hidden; }
       @media (orientation: landscape) {
         body.touch {
           grid-template-areas: 'dpad game actions';
