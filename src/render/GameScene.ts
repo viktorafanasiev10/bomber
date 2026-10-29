@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { BURN_TIME, FLAME_TIME, FUSE_TIME, type Bomb, type Burning, type FlameCell } from '../core/bomb';
+import { ENEMY_DEATH_TIME, type Enemy } from '../core/enemy';
 import { Game, TICK } from '../core/game';
 import { Tile } from '../core/grid';
 import type { Player } from '../core/player';
@@ -18,7 +19,12 @@ export class GameScene extends Phaser.Scene {
   private bombsGfx!: Phaser.GameObjects.Graphics;
   private playerGfx!: Phaser.GameObjects.Graphics;
   private flamesGfx!: Phaser.GameObjects.Graphics;
+  private enemiesGfx!: Phaser.GameObjects.Graphics;
+  private hudText!: Phaser.GameObjects.Text;
   private mapVersion = -1;
+  private shownScore = -1;
+  /** Dead enemies that already got a score popup. */
+  private popped = new WeakSet<Enemy>();
   /** `?seed=123` in the URL pins the map, handy for testing and sharing a layout. */
   private seed = Number(new URLSearchParams(location.search).get('seed')) || Date.now();
   private accumulator = 0;
@@ -31,6 +37,7 @@ export class GameScene extends Phaser.Scene {
     this.drawHud();
     this.map = this.add.graphics({ y: HUD_HEIGHT });
     this.bombsGfx = this.add.graphics({ y: HUD_HEIGHT });
+    this.enemiesGfx = this.add.graphics({ y: HUD_HEIGHT });
     this.playerGfx = this.add.graphics();
     this.flamesGfx = this.add.graphics({ y: HUD_HEIGHT });
     this.controls = new KeyboardInput(this);
@@ -57,7 +64,13 @@ export class GameScene extends Phaser.Scene {
     this.bombsGfx.clear();
     for (const c of burning) drawBurning(this.bombsGfx, c, now);
     for (const b of bombs) drawBomb(this.bombsGfx, b, now);
+    this.enemiesGfx.clear();
+    for (const e of this.state.enemies) {
+      drawEnemy(this.enemiesGfx, e, now);
+      if (!e.alive && !this.popped.has(e)) this.scorePopup(e);
+    }
     drawPlayer(this.playerGfx, player, now, this.state.deadFor);
+    if (this.state.score !== this.shownScore) this.updateHud();
     this.flamesGfx.clear();
     for (const e of explosions) {
       for (const c of e.cells) drawFlame(this.flamesGfx, c, e.timeLeft);
@@ -70,10 +83,38 @@ export class GameScene extends Phaser.Scene {
     this.accumulator = 0;
   }
 
+  private updateHud(): void {
+    this.shownScore = this.state.score;
+    this.hudText.setText(`STAGE 1   SCORE ${this.shownScore}   LIVES 3`);
+  }
+
+  private scorePopup(e: Enemy): void {
+    this.popped.add(e);
+    const text = this.add
+      .text(e.x * TILE + TILE / 2, HUD_HEIGHT + e.y * TILE, `${e.stats.points}`, {
+        fontFamily: 'monospace',
+        fontSize: '18px',
+        fontStyle: 'bold',
+        color: COLORS.popupText,
+        stroke: '#000000',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setDepth(10);
+    this.tweens.add({
+      targets: text,
+      y: text.y - 36,
+      alpha: 0,
+      duration: 900,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    });
+  }
+
   private drawHud(): void {
     this.add.rectangle(0, 0, WIDTH, HUD_HEIGHT, COLORS.hud).setOrigin(0);
-    this.add
-      .text(16, HUD_HEIGHT / 2, 'STAGE 1   TIME 200   LIVES 3', {
+    this.hudText = this.add
+      .text(16, HUD_HEIGHT / 2, '', {
         fontFamily: 'monospace',
         fontSize: '20px',
         color: COLORS.hudText,
@@ -219,5 +260,35 @@ function drawFlame(g: Phaser.GameObjects.Graphics, c: FlameCell, timeLeft: numbe
     if (c.part === 'down') g.fillRect(px + mid - tipW / 2, py, tipW, mid);
     if (c.part === 'up') g.fillRect(px + mid - tipW / 2, py + mid, tipW, mid);
     g.fillCircle(px + mid, py + mid, tipW / 2);
+  }
+}
+
+function drawEnemy(g: Phaser.GameObjects.Graphics, e: Enemy, now: number): void {
+  const dying = e.alive ? 0 : Math.min(e.deadFor / ENEMY_DEATH_TIME, 1);
+  // Dead enemies flash, then shrink away.
+  if (!e.alive && Math.floor(now / 70) % 2) return;
+  const s = 1 - dying * 0.8;
+  const cx = e.x * TILE + TILE / 2;
+  const cy = e.y * TILE + TILE / 2 + (e.alive ? Math.sin(now / 180 + e.x) * 2 : 0);
+  const r = TILE * 0.36 * s;
+  const lookX = e.dir === 'left' ? -1 : e.dir === 'right' ? 1 : 0;
+  const lookY = e.dir === 'up' ? -1 : e.dir === 'down' ? 1 : 0;
+
+  if (e.kind === 'balloom') {
+    g.fillStyle(0x000000, 0.2).fillEllipse(cx, e.y * TILE + TILE - 5, r * 1.4, r * 0.4);
+    g.fillStyle(e.alive ? COLORS.balloom : COLORS.enemyDead).fillCircle(cx, cy, r);
+    g.fillStyle(COLORS.balloomShade).fillTriangle(cx - 4 * s, cy + r - 1, cx + 4 * s, cy + r - 1, cx, cy + r + 6 * s);
+  } else {
+    g.fillStyle(0x000000, 0.2).fillEllipse(cx, e.y * TILE + TILE - 5, r * 1.4, r * 0.4);
+    g.fillStyle(e.alive ? COLORS.onil : COLORS.enemyDead);
+    g.fillCircle(cx, cy + r * 0.15, r * 0.9);
+    g.fillTriangle(cx - r * 0.85, cy, cx + r * 0.85, cy, cx, cy - r * 1.15);
+  }
+
+  // Eyes, looking where it's heading.
+  const ex = r * 0.38;
+  for (const side of [-1, 1]) {
+    g.fillStyle(0xffffff).fillCircle(cx + side * ex, cy - r * 0.05, r * 0.26);
+    g.fillStyle(COLORS.playerEye).fillCircle(cx + side * ex + lookX * r * 0.1, cy - r * 0.05 + lookY * r * 0.1, r * 0.12);
   }
 }

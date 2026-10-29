@@ -25,7 +25,12 @@ export const COLORS = {
   flameMid: 0xffc400,
   flameCore: 0xfffde7,
   char: 0x3e2723,
+  balloom: 0xff8a65,
+  balloomShade: 0xd84315,
+  onil: 0x42a5f5,
+  enemyDead: 0xeeeeee,
   hud: 0x1b1b1f,
   hudText: '#f5f5f5',
   hudHint: '#9e9e9e',
+  popupText: '#ffffff',
 };

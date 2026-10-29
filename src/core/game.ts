@@ -7,26 +7,47 @@ import {
   type Burning,
   type Explosion,
 } from './bomb';
+import { CONTACT_DISTANCE, ENEMY_DEATH_TIME, spawnEnemies, type Enemy, type EnemyKind } from './enemy';
 import { Tile, type Grid } from './grid';
 import { generateLevel, PLAYER_SPAWN } from './level';
 import { Player, type PlayerInput } from './player';
-import { createRng } from './rng';
+import { createRng, type Rng } from './rng';
 
 /** Fixed simulation step, in seconds. */
 export const TICK = 1 / 60;
 
+export const STAGE_ENEMIES: EnemyKind[] = ['balloom', 'balloom', 'balloom', 'balloom', 'onil', 'onil'];
+
+export interface GameOptions {
+  /** Defaults to STAGE_ENEMIES for generated levels and none for a supplied grid. */
+  enemies?: EnemyKind[];
+  /** RNG seed when a grid is supplied (otherwise the level seed is used). */
+  seed?: number;
+}
+
 export class Game {
   readonly grid: Grid;
   readonly player: Player;
+  readonly rng: Rng;
+  enemies: Enemy[];
+  score = 0;
   bombs: Bomb[] = [];
   explosions: Explosion[] = [];
   burning: Burning[] = [];
   /** Seconds since the player died (0 while alive). */
   deadFor = 0;
 
-  constructor(seedOrGrid: number | Grid) {
-    this.grid = typeof seedOrGrid === 'number' ? generateLevel(createRng(seedOrGrid)) : seedOrGrid;
+  constructor(seedOrGrid: number | Grid, opts: GameOptions = {}) {
+    const generated = typeof seedOrGrid === 'number';
+    this.rng = createRng(generated ? seedOrGrid : (opts.seed ?? 1));
+    this.grid = generated ? generateLevel(this.rng) : seedOrGrid;
     this.player = new Player(PLAYER_SPAWN);
+    this.enemies = spawnEnemies(this.grid, opts.enemies ?? (generated ? STAGE_ENEMIES : []), this.rng);
+  }
+
+  /** All enemies defeated. */
+  get cleared(): boolean {
+    return this.enemies.every((e) => !e.alive);
   }
 
   step(input: PlayerInput): void {
@@ -40,8 +61,32 @@ export class Game {
 
     this.updateBombs();
     this.updateFlames();
+    this.updateEnemies();
 
-    if (p.alive && this.isOnFire(p.tile.x, p.tile.y)) p.alive = false;
+    if (p.alive && (this.isOnFire(p.tile.x, p.tile.y) || this.touchesEnemy())) p.alive = false;
+  }
+
+  private updateEnemies(): void {
+    const ctx = {
+      blocked: (x: number, y: number) => this.grid.isSolid(x, y) || !!this.bombAt(x, y),
+      rng: this.rng,
+      player: this.player.tile,
+    };
+    for (const e of this.enemies) {
+      e.update(TICK, ctx);
+      if (e.alive && this.isOnFire(e.tile.x, e.tile.y)) {
+        e.alive = false;
+        this.score += e.stats.points;
+      }
+    }
+    this.enemies = this.enemies.filter((e) => e.deadFor < ENEMY_DEATH_TIME);
+  }
+
+  private touchesEnemy(): boolean {
+    const p = this.player;
+    return this.enemies.some(
+      (e) => e.alive && Math.abs(e.x - p.x) < CONTACT_DISTANCE && Math.abs(e.y - p.y) < CONTACT_DISTANCE,
+    );
   }
 
   bombAt(x: number, y: number): Bomb | undefined {
