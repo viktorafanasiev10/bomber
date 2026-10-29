@@ -15,6 +15,8 @@ export interface Point {
 export class Grid {
   readonly cols: number;
   readonly rows: number;
+  /** Bumped on every change so renderers know when to redraw. */
+  version = 0;
   private readonly tiles: Tile[];
 
   constructor(cols = COLS, rows = ROWS, fill: Tile = Tile.Empty) {
@@ -33,7 +35,9 @@ export class Grid {
   }
 
   set(x: number, y: number, tile: Tile): void {
-    if (this.inBounds(x, y)) this.tiles[y * this.cols + x] = tile;
+    if (!this.inBounds(x, y)) return;
+    this.tiles[y * this.cols + x] = tile;
+    this.version++;
   }
 
   isSolid(x: number, y: number): boolean {

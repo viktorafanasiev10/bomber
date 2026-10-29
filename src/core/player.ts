@@ -79,6 +79,9 @@ export class Player {
   facing: Dir = 'down';
   moving = false;
   speed = BASE_SPEED;
+  maxBombs = 1;
+  range = 2;
+  alive = true;
 
   constructor(spawn: Point) {
     this.x = spawn.x;
