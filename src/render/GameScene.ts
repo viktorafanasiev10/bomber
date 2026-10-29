@@ -6,14 +6,19 @@ import { sound } from '../audio/sound';
 import { TICK, type GameEvent } from '../core/game';
 import { Tile, type Grid } from '../core/grid';
 import { SPEED_STEP, type Item } from '../core/items';
-import { BASE_SPEED, type Player } from '../core/player';
-import { Controls } from '../input/controls';
+import { BASE_SPEED, DIR_VEC, type Player } from '../core/player';
+import { Controls, wantsTouchControls } from '../input/controls';
 import { loadHighScore, submitScore } from '../storage';
 import { COLORS, HEIGHT, HUD_HEIGHT, TILE, WIDTH } from './config';
 
 /** Longest frame we simulate; avoids a burst of catch-up ticks after a stall. */
 const MAX_FRAME = 0.25;
 const LOW_TIME = 30;
+const TOUCH = wantsTouchControls();
+const CONTROLS_HINT = TOUCH
+  ? 'BOMB drops a bomb, BOOM sets off remote bombs'
+  : 'Move: arrows / WASD    Bomb: Space    Detonate: Z\nPause: P / Esc    Mute: M';
+const RESTART_HINT = TOUCH ? 'Tap BOMB to play again' : 'Press Space to play again';
 
 export class GameScene extends Phaser.Scene {
   private campaign!: Campaign;
@@ -140,7 +145,8 @@ export class GameScene extends Phaser.Scene {
     const speed = Math.round((player.speed - BASE_SPEED) / SPEED_STEP) + 1;
     this.hudLeft.setText(`STAGE ${c.stage}   TIME ${String(time).padStart(3, ' ')}   SCORE ${c.score}`);
     this.hudLeft.setColor(time <= LOW_TIME && c.phase === 'playing' ? COLORS.hudWarn : COLORS.hudText);
-    this.hudRight.setText(`LIVES ${c.lives}   BOMB ${player.maxBombs}  FIRE ${player.range}  SPEED ${speed}`);
+    const extras = `${player.kick ? '  KICK' : ''}${player.remote ? '  REMOTE' : ''}`;
+    this.hudRight.setText(`LIVES ${c.lives}   B${player.maxBombs} F${player.range} S${speed}${extras}`);
   }
 
   private updateOverlay(): void {
@@ -156,7 +162,7 @@ export class GameScene extends Phaser.Scene {
       case 'intro':
         show(
           `STAGE ${c.stage}`,
-          `Lives ${c.lives}\n\nClear every enemy, then find the exit\n\nMove: arrows / WASD    Bomb: Space\nPause: P / Esc    Mute: M`,
+          `Lives ${c.lives}\n\nClear every enemy, then find the exit\n\n${CONTROLS_HINT}`,
           1,
         );
         break;
@@ -166,13 +172,13 @@ export class GameScene extends Phaser.Scene {
       case 'gameover':
         show(
           'GAME OVER',
-          `${this.newRecord ? 'NEW HIGH SCORE!' : `High score ${loadHighScore()}`}\nScore ${c.score}\n\nPress Space to play again`,
+          `${this.newRecord ? 'NEW HIGH SCORE!' : `High score ${loadHighScore()}`}\nScore ${c.score}\n\n${RESTART_HINT}`,
           0.85,
         );
         break;
       default:
         if (this.paused) {
-          show('PAUSED', 'Press P / Esc to resume', 0.6);
+          show('PAUSED', TOUCH ? 'Tap II to resume' : 'Press P / Esc to resume', 0.6);
           break;
         }
         this.overlay.setVisible(false);
@@ -308,18 +314,25 @@ function drawPlayer(g: Phaser.GameObjects.Graphics, p: Player, now: number, dead
 }
 
 function drawBomb(g: Phaser.GameObjects.Graphics, b: Bomb, now: number): void {
-  // Pulses faster as the fuse burns down.
-  const urgency = 1 - b.fuse / FUSE_TIME;
+  // Pulses faster as the fuse burns down; remote bombs (no fuse) pulse slowly.
+  const remote = !Number.isFinite(b.fuse);
+  const urgency = remote ? 0 : 1 - b.fuse / FUSE_TIME;
   const pulse = Math.sin((now / 1000) * (6 + urgency * 14) * Math.PI);
   const r = TILE * 0.34 * (1 + pulse * 0.06);
-  const cx = b.x * TILE + TILE / 2;
-  const cy = b.y * TILE + TILE / 2 + 3;
+  // A kicked bomb is drawn part-way to the next tile.
+  const v = b.slide ? DIR_VEC[b.slide] : { x: 0, y: 0 };
+  const t = b.slideT ?? 0;
+  const cx = (b.x + v.x * t) * TILE + TILE / 2;
+  const cy = (b.y + v.y * t) * TILE + TILE / 2 + 3;
 
   g.fillStyle(0x000000, 0.25).fillEllipse(cx, cy + r * 0.9, r * 1.6, r * 0.5);
   g.fillStyle(COLORS.bomb).fillCircle(cx, cy, r);
   g.fillStyle(COLORS.bombShine).fillCircle(cx - r * 0.35, cy - r * 0.35, r * 0.22);
   g.fillStyle(COLORS.bombFuse).fillRect(cx + r * 0.35, cy - r * 1.05, 4, 8);
-  if (Math.floor(now / 90) % 2) {
+  if (remote) {
+    // Receiver light instead of a lit fuse.
+    g.fillStyle(Math.floor(now / 400) % 2 ? COLORS.remoteLight : COLORS.remoteDim).fillCircle(cx + r * 0.5, cy - r * 1.15, 4);
+  } else if (Math.floor(now / 90) % 2) {
     g.fillStyle(COLORS.flameOuter).fillCircle(cx + r * 0.5, cy - r * 1.15, 5);
     g.fillStyle(COLORS.flameCore).fillCircle(cx + r * 0.5, cy - r * 1.15, 2);
   }
@@ -385,15 +398,47 @@ function drawEnemy(g: Phaser.GameObjects.Graphics, e: Enemy, now: number): void 
   const lookX = e.dir === 'left' ? -1 : e.dir === 'right' ? 1 : 0;
   const lookY = e.dir === 'up' ? -1 : e.dir === 'down' ? 1 : 0;
 
-  if (e.kind === 'balloom') {
+  const body = e.alive ? COLORS[e.kind] : COLORS.enemyDead;
+  // Kondoria is a ghost: translucent so you can see it inside blocks.
+  const alpha = e.kind === 'kondoria' && e.alive ? 0.75 : 1;
+  if (e.kind !== 'kondoria') {
     g.fillStyle(0x000000, 0.2).fillEllipse(cx, e.y * TILE + TILE - 5, r * 1.4, r * 0.4);
-    g.fillStyle(e.alive ? COLORS.balloom : COLORS.enemyDead).fillCircle(cx, cy, r);
-    g.fillStyle(COLORS.balloomShade).fillTriangle(cx - 4 * s, cy + r - 1, cx + 4 * s, cy + r - 1, cx, cy + r + 6 * s);
-  } else {
-    g.fillStyle(0x000000, 0.2).fillEllipse(cx, e.y * TILE + TILE - 5, r * 1.4, r * 0.4);
-    g.fillStyle(e.alive ? COLORS.onil : COLORS.enemyDead);
-    g.fillCircle(cx, cy + r * 0.15, r * 0.9);
-    g.fillTriangle(cx - r * 0.85, cy, cx + r * 0.85, cy, cx, cy - r * 1.15);
+  }
+  g.fillStyle(body, alpha);
+  switch (e.kind) {
+    case 'balloom':
+      g.fillCircle(cx, cy, r);
+      g.fillStyle(COLORS.balloomShade).fillTriangle(cx - 4 * s, cy + r - 1, cx + 4 * s, cy + r - 1, cx, cy + r + 6 * s);
+      break;
+    case 'onil':
+      g.fillCircle(cx, cy + r * 0.15, r * 0.9);
+      g.fillTriangle(cx - r * 0.85, cy, cx + r * 0.85, cy, cx, cy - r * 1.15);
+      break;
+    case 'doll':
+      // A spinning top.
+      g.fillRoundedRect(cx - r, cy - r * 0.8, r * 2, r * 1.5, r * 0.5);
+      g.fillStyle(COLORS.dollStripe).fillRect(cx - r, cy + r * 0.25, r * 2, r * 0.22);
+      break;
+    case 'minvo': {
+      // A spiky ball.
+      const spin = now / 300;
+      for (let i = 0; i < 6; i++) {
+        const a = spin + (i * Math.PI) / 3;
+        g.fillTriangle(
+          cx + Math.cos(a - 0.35) * r * 0.8, cy + Math.sin(a - 0.35) * r * 0.8,
+          cx + Math.cos(a + 0.35) * r * 0.8, cy + Math.sin(a + 0.35) * r * 0.8,
+          cx + Math.cos(a) * r * 1.25, cy + Math.sin(a) * r * 1.25,
+        );
+      }
+      g.fillCircle(cx, cy, r * 0.85);
+      break;
+    }
+    case 'kondoria':
+      // A ghost with a wavy hem.
+      g.fillCircle(cx, cy - r * 0.15, r * 0.9);
+      g.fillRect(cx - r * 0.9, cy - r * 0.15, r * 1.8, r * 0.9);
+      for (let i = 0; i < 3; i++) g.fillCircle(cx - r * 0.6 + i * r * 0.6, cy + r * 0.75, r * 0.3);
+      break;
   }
 
   // Eyes, looking where it's heading.
@@ -422,7 +467,13 @@ function drawItem(g: Phaser.GameObjects.Graphics, item: Item, open: boolean, now
   }
 
   // Power-ups blink gently so they read as pickups, not floor.
-  const bg = { bomb: COLORS.puBomb, fire: COLORS.puFire, speed: COLORS.puSpeed }[item.kind];
+  const bg = {
+    bomb: COLORS.puBomb,
+    fire: COLORS.puFire,
+    speed: COLORS.puSpeed,
+    kick: COLORS.puKick,
+    remote: COLORS.puRemote,
+  }[item.kind];
   g.fillStyle(0x000000, 0.35).fillRoundedRect(px + m + 2, py + m + 3, TILE - 2 * m, TILE - 2 * m, 6);
   g.fillStyle(bg, Math.floor(now / 250) % 2 ? 1 : 0.85).fillRoundedRect(px + m, py + m, TILE - 2 * m, TILE - 2 * m, 6);
   const cx = px + TILE / 2;
@@ -434,8 +485,15 @@ function drawItem(g: Phaser.GameObjects.Graphics, item: Item, open: boolean, now
   } else if (item.kind === 'fire') {
     g.fillStyle(COLORS.flameOuter).fillCircle(cx, cy + 4, 8).fillTriangle(cx - 8, cy + 3, cx + 8, cy + 3, cx, cy - 13);
     g.fillStyle(COLORS.flameMid).fillCircle(cx, cy + 6, 4).fillTriangle(cx - 4, cy + 5, cx + 4, cy + 5, cx, cy - 4);
-  } else {
+  } else if (item.kind === 'speed') {
     g.fillStyle(0xffffff);
     for (const dx of [-7, 3]) g.fillTriangle(cx + dx, cy - 9, cx + dx + 8, cy, cx + dx, cy + 9);
+  } else if (item.kind === 'kick') {
+    // A boot.
+    g.fillStyle(0xffffff).fillRect(cx - 7, cy - 10, 8, 14).fillRoundedRect(cx - 7, cy + 1, 17, 8, 3);
+  } else {
+    // A detonator: box with a plunger.
+    g.fillStyle(0xffffff).fillRect(cx - 9, cy - 1, 18, 10).fillRect(cx - 2, cy - 10, 4, 9).fillRect(cx - 7, cy - 12, 14, 3);
+    g.fillStyle(COLORS.remoteLight).fillCircle(cx + 5, cy + 4, 2);
   }
 }

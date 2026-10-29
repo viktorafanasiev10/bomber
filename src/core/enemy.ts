@@ -1,9 +1,10 @@
 import type { Grid, Point } from './grid';
 import { isSafeZone, PLAYER_SPAWN } from './level';
+import { nextStepToward } from './path';
 import { DIR_VEC, type BlockedFn, type Dir } from './player';
 import type { Rng } from './rng';
 
-export type EnemyKind = 'balloom' | 'onil';
+export type EnemyKind = 'balloom' | 'onil' | 'doll' | 'minvo' | 'kondoria';
 
 export interface EnemyStats {
   /** Tiles per second. */
@@ -11,14 +12,23 @@ export interface EnemyStats {
   points: number;
   /** Chance to take a side turn at an intersection instead of going straight. */
   turnChance: number;
-  /** Chance to pick the direction that closes in on the player, when within `seekRange`. */
+  /** Chance to take the shortest path toward the player, when within `seekRange` steps. */
   seekChance: number;
   seekRange: number;
+  /** Moves through soft blocks (and can't be hit by flames while inside one). */
+  wallPass: boolean;
 }
 
+const base = { turnChance: 0.3, seekChance: 0, seekRange: 0, wallPass: false };
+
 export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
-  balloom: { speed: 1.5, points: 100, turnChance: 0.3, seekChance: 0, seekRange: 0 },
-  onil: { speed: 2.5, points: 200, turnChance: 0.4, seekChance: 0.7, seekRange: 6 },
+  balloom: { ...base, speed: 1.5, points: 100 },
+  onil: { ...base, speed: 2.5, points: 200, turnChance: 0.4, seekChance: 0.7, seekRange: 6 },
+  // Never turns by choice: bounces back and forth along long corridors.
+  doll: { ...base, speed: 2, points: 400, turnChance: 0 },
+  minvo: { ...base, speed: 3, points: 800, seekChance: 0.9, seekRange: 10 },
+  // Slow, but drifts through blocks and always knows where you are.
+  kondoria: { ...base, speed: 1.2, points: 1000, seekChance: 1, seekRange: 40, wallPass: true },
 };
 
 /** Seconds an enemy's death animation lasts before it's removed. */
@@ -32,6 +42,7 @@ const OPPOSITE: Record<Dir, Dir> = { up: 'down', down: 'up', left: 'right', righ
 const EPS = 1e-6;
 
 export interface EnemyContext {
+  /** What blocks this enemy (wall-passers ignore soft blocks). */
   blocked: BlockedFn;
   rng: Rng;
   player: Point;
@@ -115,14 +126,9 @@ export class Enemy {
     if (open.length === 0) return null;
 
     const { seekChance, seekRange, turnChance } = this.stats;
-    const dist = Math.abs(ctx.player.x - x) + Math.abs(ctx.player.y - y);
-    if (seekChance > 0 && dist <= seekRange && ctx.rng() < seekChance) {
-      const closer = open.filter((d) => {
-        const nx = x + DIR_VEC[d].x;
-        const ny = y + DIR_VEC[d].y;
-        return Math.abs(ctx.player.x - nx) + Math.abs(ctx.player.y - ny) < dist;
-      });
-      if (closer.length) return pick(closer, ctx.rng);
+    if (seekChance > 0 && ctx.rng() < seekChance) {
+      const toward = nextStepToward({ x, y }, ctx.player, ctx.blocked, seekRange);
+      if (toward) return toward;
     }
 
     // Avoid U-turns unless it's a dead end.

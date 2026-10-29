@@ -12,6 +12,8 @@ export const DIR_VEC: Record<Dir, Point> = {
 export interface PlayerInput {
   dir: Dir | null;
   bomb: boolean;
+  /** Set off the oldest bomb (with the remote power-up). */
+  detonate?: boolean;
 }
 
 /** Whether a tile can't be entered (walls now, bombs later). */
@@ -81,6 +83,8 @@ export class Player {
   speed = BASE_SPEED;
   maxBombs = 1;
   range = 2;
+  kick = false;
+  remote = false;
   alive = true;
 
   constructor(spawn: Point) {

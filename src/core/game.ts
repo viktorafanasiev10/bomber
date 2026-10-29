@@ -3,6 +3,7 @@ import {
   computeBlast,
   FLAME_TIME,
   FUSE_TIME,
+  KICK_SPEED,
   type Bomb,
   type Burning,
   type Explosion,
@@ -11,7 +12,7 @@ import { CONTACT_DISTANCE, ENEMY_DEATH_TIME, spawnEnemies, type Enemy } from './
 import { Tile, type Grid } from './grid';
 import { applyPowerUp, hideItems, tileKey, type Item, type ItemKind, type PlayerStats } from './items';
 import { generateLevel, PLAYER_SPAWN } from './level';
-import { Player, type PlayerInput } from './player';
+import { DIR_VEC, Player, type Dir, type PlayerInput } from './player';
 import { createRng, type Rng } from './rng';
 import { stageConfig, type StageConfig } from './stages';
 
@@ -87,8 +88,8 @@ export class Game {
   }
 
   get stats(): PlayerStats {
-    const { maxBombs, range, speed } = this.player;
-    return { maxBombs, range, speed };
+    const { maxBombs, range, speed, kick, remote } = this.player;
+    return { maxBombs, range, speed, kick, remote };
   }
 
   itemAt(x: number, y: number): Item | undefined {
@@ -100,7 +101,9 @@ export class Game {
     if (this.exited) return;
     if (p.alive) {
       p.update(TICK, input, (x, y) => this.isBlocked(x, y));
+      if (input.dir && p.kick) this.tryKick(input.dir);
       if (input.bomb) this.placeBomb();
+      if (input.detonate && p.remote && this.bombs.length) this.detonate(this.bombs[0]);
       this.timeLeft = Math.max(0, this.timeLeft - TICK);
     } else {
       this.deadFor += TICK;
@@ -136,14 +139,11 @@ export class Game {
   }
 
   private updateEnemies(): void {
-    const ctx = {
-      blocked: (x: number, y: number) => this.grid.isSolid(x, y) || !!this.bombAt(x, y),
-      rng: this.rng,
-      player: this.player.tile,
-    };
+    const walker = (x: number, y: number) => this.grid.isSolid(x, y) || !!this.bombAt(x, y);
+    const ghost = (x: number, y: number) => this.grid.get(x, y) === Tile.Hard || !!this.bombAt(x, y);
     const wasCleared = this.cleared;
     for (const e of this.enemies) {
-      e.update(TICK, ctx);
+      e.update(TICK, { blocked: e.stats.wallPass ? ghost : walker, rng: this.rng, player: this.player.tile });
       if (e.alive && this.isOnFire(e.tile.x, e.tile.y)) {
         e.alive = false;
         this.score += e.stats.points;
@@ -173,7 +173,8 @@ export class Game {
     const p = this.player;
     const { x, y } = p.tile;
     if (!p.alive || this.bombs.length >= p.maxBombs || this.bombAt(x, y)) return false;
-    this.bombs.push({ x, y, fuse: FUSE_TIME, range: p.range, passable: true });
+    // With the remote, bombs only go off when detonated (or caught in another blast).
+    this.bombs.push({ x, y, fuse: p.remote ? Infinity : FUSE_TIME, range: p.range, passable: true });
     this.events.push('bomb');
     return true;
   }
@@ -184,9 +185,49 @@ export class Game {
     return !!bomb && !bomb.passable;
   }
 
+  /** Kicks the bomb the player is pushing against, if they're flush with it. */
+  private tryKick(dir: Dir): void {
+    const p = this.player;
+    const v = DIR_VEC[dir];
+    const bomb = this.bombAt(p.tile.x + v.x, p.tile.y + v.y);
+    if (!bomb || bomb.passable || bomb.slide) return;
+    const flush = Math.abs(p.x - (bomb.x - v.x)) < 0.05 && Math.abs(p.y - (bomb.y - v.y)) < 0.05;
+    if (flush && !this.blocksSlide(bomb.x + v.x, bomb.y + v.y)) {
+      bomb.slide = dir;
+      bomb.slideT = 0;
+    }
+  }
+
+  /** Kicked bombs stop at walls, other bombs, items, enemies and the player. */
+  private blocksSlide(x: number, y: number): boolean {
+    const p = this.player.tile;
+    return (
+      this.grid.isSolid(x, y) ||
+      !!this.bombAt(x, y) ||
+      !!this.itemAt(x, y) ||
+      (p.x === x && p.y === y) ||
+      this.enemies.some((e) => e.alive && e.tile.x === x && e.tile.y === y)
+    );
+  }
+
+  private slideBomb(b: Bomb): void {
+    const v = DIR_VEC[b.slide!];
+    b.slideT! += KICK_SPEED * TICK;
+    while (b.slide && b.slideT! >= 1) {
+      b.x += v.x;
+      b.y += v.y;
+      b.slideT! -= 1;
+      if (this.blocksSlide(b.x + v.x, b.y + v.y)) {
+        b.slide = undefined;
+        b.slideT = 0;
+      }
+    }
+  }
+
   private updateBombs(): void {
     const p = this.player;
     for (const b of this.bombs) {
+      if (b.slide) this.slideBomb(b);
       // Once the player has fully stepped off, the bomb becomes solid for good.
       if (b.passable && (Math.abs(p.x - b.x) >= 1 || Math.abs(p.y - b.y) >= 1)) b.passable = false;
       b.fuse -= TICK;

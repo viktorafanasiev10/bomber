@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { sound } from '../audio/sound';
+import { wantsTouchControls } from '../input/controls';
 import { loadHighScore } from '../storage';
 import { COLORS, HEIGHT, WIDTH } from './config';
 
@@ -35,7 +36,7 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const prompt = this.add
-      .text(cx, 380, 'Press Space or Enter to start', {
+      .text(cx, 380, wantsTouchControls() ? 'Tap to start' : 'Press Space or Enter to start', {
         fontFamily: 'monospace',
         fontSize: '22px',
         color: COLORS.hudText,
@@ -55,7 +56,7 @@ export class TitleScene extends Phaser.Scene {
       .text(
         cx,
         520,
-        'Move: arrows / WASD     Bomb: Space\nPause: P / Esc     Mute: M\nGamepad: d-pad or stick, A to bomb, Start to pause',
+        'Move: arrows / WASD     Bomb: Space     Detonate: Z\nPause: P / Esc     Mute: M\nGamepad: d-pad or stick, A bomb, B detonate, Start pause',
         { fontFamily: 'monospace', fontSize: '15px', color: COLORS.hudHint, align: 'center', lineSpacing: 6 },
       )
       .setOrigin(0.5, 0);

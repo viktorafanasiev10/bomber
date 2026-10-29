@@ -1,7 +1,7 @@
 import { Tile, type Grid, type Point } from './grid';
 import type { Rng } from './rng';
 
-export type PowerUpKind = 'bomb' | 'fire' | 'speed';
+export type PowerUpKind = 'bomb' | 'fire' | 'speed' | 'kick' | 'remote';
 export type ItemKind = 'exit' | PowerUpKind;
 
 export interface Item {
@@ -19,12 +19,18 @@ export interface PlayerStats {
   maxBombs: number;
   range: number;
   speed: number;
+  /** Walking into a bomb sends it sliding. */
+  kick: boolean;
+  /** Bombs wait for the detonate button instead of a fuse. */
+  remote: boolean;
 }
 
 export function applyPowerUp(stats: PlayerStats, kind: PowerUpKind): void {
   if (kind === 'bomb') stats.maxBombs = Math.min(stats.maxBombs + 1, MAX_BOMBS);
   if (kind === 'fire') stats.range = Math.min(stats.range + 1, MAX_RANGE);
   if (kind === 'speed') stats.speed = Math.min(stats.speed + SPEED_STEP, MAX_SPEED);
+  if (kind === 'kick') stats.kick = true;
+  if (kind === 'remote') stats.remote = true;
 }
 
 export const tileKey = (p: Point) => `${p.x},${p.y}`;

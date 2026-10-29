@@ -44,11 +44,13 @@ describe('hideItems', () => {
 
 describe('applyPowerUp', () => {
   it('raises stats up to their caps', () => {
-    const stats = { maxBombs: 1, range: 2, speed: MAX_SPEED - 0.25 };
+    const stats = { maxBombs: 1, range: 2, speed: MAX_SPEED - 0.25, kick: false, remote: false };
     applyPowerUp(stats, 'bomb');
     applyPowerUp(stats, 'fire');
     applyPowerUp(stats, 'speed');
-    expect(stats).toEqual({ maxBombs: 2, range: 3, speed: MAX_SPEED });
+    applyPowerUp(stats, 'kick');
+    applyPowerUp(stats, 'remote');
+    expect(stats).toEqual({ maxBombs: 2, range: 3, speed: MAX_SPEED, kick: true, remote: true });
   });
 });
 
@@ -116,7 +118,8 @@ describe('Game items', () => {
   });
 
   it('starts with carried-over stats', () => {
-    const game = new Game(arena(), { stats: { maxBombs: 3, range: 4, speed: 4 } });
-    expect(game.stats).toEqual({ maxBombs: 3, range: 4, speed: 4 });
+    const stats = { maxBombs: 3, range: 4, speed: 4, kick: true, remote: false };
+    const game = new Game(arena(), { stats });
+    expect(game.stats).toEqual(stats);
   });
 });

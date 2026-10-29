@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { sound } from './audio/sound';
 import { GameScene } from './render/GameScene';
 import { TitleScene } from './render/TitleScene';
 import { HEIGHT, WIDTH } from './render/config';
@@ -16,3 +17,6 @@ new Phaser.Game({
   },
   scene: [TitleScene, GameScene],
 });
+
+// Browsers only allow audio after a user gesture: unlock on the first touch or key.
+for (const type of ['pointerdown', 'keydown'] as const) window.addEventListener(type, () => sound.unlock());

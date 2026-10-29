@@ -2,15 +2,79 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#111111" />
     <title>Bomber</title>
     <style>
       html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
+      body { height: 100dvh; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
       #game { width: 100%; height: 100%; }
+      #touch { display: none; }
+
+      /* Touch layout: controls below the game in portrait, beside it in landscape. */
+      body.touch {
+        display: grid;
+        grid-template-areas: 'game game' 'dpad actions';
+        grid-template-rows: minmax(0, 1fr) auto;
+        grid-template-columns: 1fr 1fr;
+      }
+      body.touch #game { grid-area: game; height: auto; min-height: 0; min-width: 0; }
+      body.touch #touch { display: contents; }
+      @media (orientation: landscape) {
+        body.touch {
+          grid-template-areas: 'dpad game actions';
+          grid-template-rows: minmax(0, 1fr);
+          grid-template-columns: auto minmax(0, 1fr) auto;
+        }
+      }
+
+      .dpad, .actions {
+        display: flex; align-items: center; justify-content: center;
+        padding: 16px max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-bottom));
+        touch-action: none;
+      }
+      .actions { flex-direction: column; gap: 14px; }
+      .actions-row { display: flex; gap: 18px; align-items: center; }
+      .dpad-pad {
+        position: relative; width: 156px; height: 156px; border-radius: 50%;
+        background: #222; box-shadow: inset 0 0 0 2px #333; touch-action: none;
+      }
+      .dpad-pad span {
+        position: absolute; width: 52px; height: 52px; display: grid; place-items: center;
+        color: #888; font: 22px monospace; border-radius: 10px; background: #2c2c30;
+      }
+      .dpad-pad span.on { background: #3d5afe; color: #fff; }
+      .dpad-pad [data-dir='up'] { left: 52px; top: 0; }
+      .dpad-pad [data-dir='down'] { left: 52px; bottom: 0; }
+      .dpad-pad [data-dir='left'] { left: 0; top: 52px; }
+      .dpad-pad [data-dir='right'] { right: 0; top: 52px; }
+      .btn {
+        border: 0; border-radius: 50%; color: #fff; font: bold 14px monospace;
+        touch-action: none; -webkit-tap-highlight-color: transparent;
+      }
+      .btn:active, .btn.on { filter: brightness(1.4); }
+      .btn-bomb { width: 84px; height: 84px; background: #d84315; }
+      .btn-detonate { width: 60px; height: 60px; background: #455a64; }
+      .btn-pause { width: 44px; height: 44px; background: #333; font-size: 16px; }
     </style>
   </head>
   <body>
     <div id="game"></div>
+    <div id="touch" aria-hidden="true">
+      <div class="dpad">
+        <div class="dpad-pad">
+          <span data-dir="up">▲</span><span data-dir="down">▼</span>
+          <span data-dir="left">◀</span><span data-dir="right">▶</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-pause" data-act="pause">II</button>
+        <div class="actions-row">
+          <button class="btn btn-detonate" data-act="detonate">BOOM</button>
+          <button class="btn btn-bomb" data-act="bomb">BOMB</button>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -5,6 +5,8 @@ import { DIR_VEC, type Dir } from './player';
 export const FUSE_TIME = 3;
 export const FLAME_TIME = 0.5;
 export const BURN_TIME = 0.5;
+/** Tiles per second for a kicked bomb. */
+export const KICK_SPEED = 8;
 
 export interface Bomb {
   x: number;
@@ -13,6 +15,10 @@ export interface Bomb {
   range: number;
   /** True while the player who placed it still overlaps it, so they can walk off. */
   passable: boolean;
+  /** Direction it's sliding after a kick. It stays on (x, y) until it fully reaches the next tile. */
+  slide?: Dir;
+  /** Progress toward the next tile while sliding, 0–1. */
+  slideT?: number;
 }
 
 export interface FlameCell {

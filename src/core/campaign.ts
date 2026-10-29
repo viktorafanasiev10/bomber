@@ -13,7 +13,7 @@ export const TIME_BONUS_PER_SECOND = 10;
 
 export type Phase = 'intro' | 'playing' | 'dying' | 'cleared' | 'gameover';
 
-const START_STATS: PlayerStats = { maxBombs: 1, range: 2, speed: BASE_SPEED };
+const START_STATS: PlayerStats = { maxBombs: 1, range: 2, speed: BASE_SPEED, kick: false, remote: false };
 const IDLE: PlayerInput = { dir: null, bomb: false };
 
 /** A run of stages: lives, banked score, carried-over power-ups and phase flow. */
