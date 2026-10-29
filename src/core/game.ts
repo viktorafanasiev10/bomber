@@ -20,6 +20,18 @@ export const TICK = 1 / 60;
 
 export const POINTS_PER_POWER_UP = 1000;
 
+/** Things that happened during a step, for sound and visual effects. */
+export type GameEvent =
+  | 'bomb'
+  | 'explosion'
+  | 'enemy-killed'
+  | 'power-up'
+  | 'player-died'
+  | 'exit-open'
+  | 'stage-start'
+  | 'stage-clear'
+  | 'game-over';
+
 export interface GameOptions {
   /**
    * Generated levels default to stage 1. A supplied grid (tests) defaults to no
@@ -51,6 +63,8 @@ export class Game {
   items: Item[] = [];
   /** The player walked into the open exit. */
   exited = false;
+  /** Events since the renderer last drained them. */
+  events: GameEvent[] = [];
 
   constructor(seedOrGrid: number | Grid, opts: GameOptions = {}) {
     const generated = typeof seedOrGrid === 'number';
@@ -99,6 +113,7 @@ export class Game {
 
     if (p.alive && (this.isOnFire(p.tile.x, p.tile.y) || this.touchesEnemy() || this.timeLeft <= 0)) {
       p.alive = false;
+      this.events.push('player-died');
     }
   }
 
@@ -114,6 +129,7 @@ export class Game {
       this.exited = this.cleared;
     } else {
       applyPowerUp(p, item.kind);
+      this.events.push('power-up');
       this.score += POINTS_PER_POWER_UP;
       this.items = this.items.filter((i) => i !== item);
     }
@@ -125,13 +141,16 @@ export class Game {
       rng: this.rng,
       player: this.player.tile,
     };
+    const wasCleared = this.cleared;
     for (const e of this.enemies) {
       e.update(TICK, ctx);
       if (e.alive && this.isOnFire(e.tile.x, e.tile.y)) {
         e.alive = false;
         this.score += e.stats.points;
+        this.events.push('enemy-killed');
       }
     }
+    if (!wasCleared && this.cleared) this.events.push('exit-open');
     this.enemies = this.enemies.filter((e) => e.deadFor < ENEMY_DEATH_TIME);
   }
 
@@ -155,6 +174,7 @@ export class Game {
     const { x, y } = p.tile;
     if (!p.alive || this.bombs.length >= p.maxBombs || this.bombAt(x, y)) return false;
     this.bombs.push({ x, y, fuse: FUSE_TIME, range: p.range, passable: true });
+    this.events.push('bomb');
     return true;
   }
 
@@ -184,6 +204,7 @@ export class Game {
 
       const blast = computeBlast(this.grid, b, b.range, (x, y) => !!this.bombAt(x, y));
       this.explosions.push({ cells: blast.cells, timeLeft: FLAME_TIME });
+      this.events.push('explosion');
       for (const t of blast.burnt) {
         if (!this.burning.some((c) => c.x === t.x && c.y === t.y)) {
           this.burning.push({ ...t, timeLeft: BURN_TIME });

@@ -2,11 +2,13 @@ import Phaser from 'phaser';
 import { BURN_TIME, FLAME_TIME, FUSE_TIME, type Bomb, type Burning, type FlameCell } from '../core/bomb';
 import { Campaign, DEATH_TIME } from '../core/campaign';
 import { ENEMY_DEATH_TIME, type Enemy } from '../core/enemy';
-import { TICK } from '../core/game';
+import { sound } from '../audio/sound';
+import { TICK, type GameEvent } from '../core/game';
 import { Tile, type Grid } from '../core/grid';
 import { SPEED_STEP, type Item } from '../core/items';
 import { BASE_SPEED, type Player } from '../core/player';
-import { KeyboardInput } from '../input/keyboard';
+import { Controls } from '../input/controls';
+import { loadHighScore, submitScore } from '../storage';
 import { COLORS, HEIGHT, HUD_HEIGHT, TILE, WIDTH } from './config';
 
 /** Longest frame we simulate; avoids a burst of catch-up ticks after a stall. */
@@ -15,7 +17,7 @@ const LOW_TIME = 30;
 
 export class GameScene extends Phaser.Scene {
   private campaign!: Campaign;
-  private controls!: KeyboardInput;
+  private controls!: Controls;
   private map!: Phaser.GameObjects.Graphics;
   private bombsGfx!: Phaser.GameObjects.Graphics;
   private playerGfx!: Phaser.GameObjects.Graphics;
@@ -32,6 +34,8 @@ export class GameScene extends Phaser.Scene {
   /** Dead enemies that already got a score popup. */
   private popped = new WeakSet<Enemy>();
   private accumulator = 0;
+  private paused = false;
+  private newRecord = false;
 
   constructor() {
     super('game');
@@ -45,7 +49,12 @@ export class GameScene extends Phaser.Scene {
     this.playerGfx = this.add.graphics();
     this.flamesGfx = this.add.graphics({ y: HUD_HEIGHT });
     this.createOverlay();
-    this.controls = new KeyboardInput(this);
+    this.controls = new Controls(this);
+    this.paused = false;
+    // Any key counts as the gesture browsers need before audio can play.
+    this.input.keyboard?.on('keydown', () => sound.unlock());
+    this.game.events.on('blur', () => this.setPaused(true));
+    this.events.once('shutdown', () => sound.stopMusic());
 
     // `?seed=123` in the URL pins every stage's layout, handy for testing and sharing.
     const seed = Number(new URLSearchParams(location.search).get('seed')) || Date.now();
@@ -55,10 +64,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, deltaMs: number): void {
-    this.accumulator += Math.min(deltaMs / 1000, MAX_FRAME);
-    while (this.accumulator >= TICK) {
-      this.campaign.step(this.controls.read());
-      this.accumulator -= TICK;
+    if (this.controls.consume('mute')) sound.toggleMute();
+    if (this.controls.consume('pause')) this.setPaused(!this.paused);
+
+    if (this.paused) {
+      this.controls.read(); // drop presses made while paused
+    } else {
+      this.accumulator += Math.min(deltaMs / 1000, MAX_FRAME);
+      while (this.accumulator >= TICK) {
+        this.campaign.step(this.controls.read());
+        this.accumulator -= TICK;
+      }
+      this.handleEvents(this.campaign.drainEvents());
     }
 
     const game = this.campaign.game;
@@ -84,6 +101,38 @@ export class GameScene extends Phaser.Scene {
     this.updateOverlay();
   }
 
+  private setPaused(paused: boolean): void {
+    // Only gameplay can be paused; menus and transitions just run.
+    if (paused && this.campaign.phase !== 'playing') return;
+    if (paused === this.paused) return;
+    this.paused = paused;
+    this.accumulator = 0;
+    if (paused) sound.stopMusic();
+    else sound.startMusic();
+  }
+
+  private handleEvents(events: GameEvent[]): void {
+    // A chain reaction can fire many explosions in one tick; play each sound once.
+    for (const event of new Set(events)) {
+      sound.play(event);
+      switch (event) {
+        case 'explosion':
+          this.cameras.main.shake(180, 0.006);
+          break;
+        case 'stage-start':
+          sound.startMusic();
+          break;
+        case 'player-died':
+        case 'stage-clear':
+          sound.stopMusic();
+          break;
+        case 'game-over':
+          this.newRecord = submitScore(this.campaign.score);
+          break;
+      }
+    }
+  }
+
   private updateHud(): void {
     const c = this.campaign;
     const { player, timeLeft } = c.game;
@@ -107,7 +156,7 @@ export class GameScene extends Phaser.Scene {
       case 'intro':
         show(
           `STAGE ${c.stage}`,
-          `Lives ${c.lives}\n\nClear every enemy, then find the exit\nMove: arrows / WASD    Bomb: Space`,
+          `Lives ${c.lives}\n\nClear every enemy, then find the exit\n\nMove: arrows / WASD    Bomb: Space\nPause: P / Esc    Mute: M`,
           1,
         );
         break;
@@ -115,9 +164,17 @@ export class GameScene extends Phaser.Scene {
         show('STAGE CLEAR!', `Time bonus +${c.timeBonus}`, 0.6);
         break;
       case 'gameover':
-        show('GAME OVER', `Score ${c.score}\n\nPress Space to play again`, 0.85);
+        show(
+          'GAME OVER',
+          `${this.newRecord ? 'NEW HIGH SCORE!' : `High score ${loadHighScore()}`}\nScore ${c.score}\n\nPress Space to play again`,
+          0.85,
+        );
         break;
       default:
+        if (this.paused) {
+          show('PAUSED', 'Press P / Esc to resume', 0.6);
+          break;
+        }
         this.overlay.setVisible(false);
     }
   }
@@ -233,7 +290,10 @@ function drawPlayer(g: Phaser.GameObjects.Graphics, p: Player, now: number, dead
   const cx = TILE / 2;
   // Body and feet.
   g.fillStyle(COLORS.playerSuit).fillRoundedRect(cx - 11, 26, 22, 16, 5);
-  g.fillStyle(COLORS.playerAccent).fillRect(cx - 12, 40, 9, 6).fillRect(cx + 3, 40, 9, 6);
+  // Feet alternate while walking.
+  const stride = p.moving ? Math.sin(now / 60) * 3 : 0;
+  g.fillStyle(COLORS.playerAccent).fillRect(cx - 12, 40 + stride, 9, 6 - Math.max(stride, 0));
+  g.fillRect(cx + 3, 40 - stride, 9, 6 - Math.max(-stride, 0));
   // Head.
   g.fillStyle(COLORS.player).fillCircle(cx, 18, 14);
   g.fillStyle(COLORS.playerAccent).fillCircle(cx, 3, 4);

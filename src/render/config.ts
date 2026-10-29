@@ -32,6 +32,7 @@ export const COLORS = {
   hud: 0x1b1b1f,
   hudText: '#f5f5f5',
   hudWarn: '#ff5252',
+  hudHint: '#9e9e9e',
   overlay: 0x101014,
   exitFrame: 0x5d4037,
   exitDoor: 0x8d6e63,

@@ -81,3 +81,34 @@ describe('stageConfig', () => {
     expect(stageConfig(20).enemies).toHaveLength(10);
   });
 });
+
+describe('Campaign events', () => {
+  it('reports the stage flow and gameplay events once', () => {
+    const c = new Campaign(1);
+    run(c, INTRO_TIME + TICK);
+    expect(c.drainEvents()).toEqual(['stage-start']);
+    expect(c.drainEvents()).toEqual([]);
+
+    c.step({ dir: null, bomb: true });
+    expect(c.drainEvents()).toEqual(['bomb']);
+
+    c.game.enemies.forEach((e) => (e.alive = false));
+    c.game.exited = true;
+    c.step(idle);
+    expect(c.drainEvents()).toEqual(['stage-clear']);
+  });
+
+  it('reports explosions, kills, the exit opening and death', () => {
+    const c = new Campaign(1);
+    run(c, INTRO_TIME + TICK);
+    c.drainEvents();
+    const g = c.game;
+    const [first, ...rest] = g.enemies;
+    rest.forEach((e) => (e.alive = false));
+    g.bombs.push({ ...first.tile, fuse: TICK, range: 1, passable: false });
+    g.player.x = first.tile.x; // stand in the blast too
+    g.player.y = first.tile.y;
+    c.step(idle);
+    expect(c.drainEvents().sort()).toEqual(['enemy-killed', 'exit-open', 'explosion', 'player-died'].sort());
+  });
+});

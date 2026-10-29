@@ -1,4 +1,4 @@
-import { Game, TICK } from './game';
+import { Game, TICK, type GameEvent } from './game';
 import type { PlayerStats } from './items';
 import type { PlayerInput } from './player';
 import { BASE_SPEED } from './player';
@@ -29,6 +29,7 @@ export class Campaign {
   phaseTime = 0;
   timeBonus = 0;
   game: Game;
+  private events: GameEvent[] = [];
 
   constructor(seed: number) {
     this.seed = seed;
@@ -39,11 +40,22 @@ export class Campaign {
     return this.bankedScore + this.game.score;
   }
 
+  /** Returns and clears everything that happened since the last call. */
+  drainEvents(): GameEvent[] {
+    const events = [...this.events, ...this.game.events];
+    this.events = [];
+    this.game.events = [];
+    return events;
+  }
+
   step(input: PlayerInput): void {
     this.phaseTime += TICK;
     switch (this.phase) {
       case 'intro':
-        if (this.phaseTime >= INTRO_TIME) this.setPhase('playing');
+        if (this.phaseTime >= INTRO_TIME) {
+          this.setPhase('playing');
+          this.events.push('stage-start');
+        }
         break;
       case 'playing':
         this.game.step(input);
@@ -71,6 +83,7 @@ export class Campaign {
     this.bankedScore += this.game.score + this.timeBonus;
     this.stats = this.game.stats;
     this.setPhase('cleared');
+    this.events.push('stage-clear');
   }
 
   private loseLife(): void {
@@ -79,7 +92,10 @@ export class Campaign {
     this.bankedScore += this.game.score;
     this.stats = this.game.stats;
     if (this.lives > 0) this.restartStage();
-    else this.setPhase('gameover');
+    else {
+      this.setPhase('gameover');
+      this.events.push('game-over');
+    }
   }
 
   private reset(): void {
