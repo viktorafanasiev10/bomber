@@ -1,13 +1,20 @@
 import Phaser from 'phaser';
-import { Tile, type Grid } from '../core/grid';
-import { generateLevel, PLAYER_SPAWN } from '../core/level';
-import { createRng } from '../core/rng';
+import { Game, TICK } from '../core/game';
+import { Tile } from '../core/grid';
+import type { Player } from '../core/player';
+import { KeyboardInput } from '../input/keyboard';
 import { COLORS, HUD_HEIGHT, TILE, WIDTH } from './config';
 
+/** Longest frame we simulate; avoids a burst of catch-up ticks after a stall. */
+const MAX_FRAME = 0.25;
+
 export class GameScene extends Phaser.Scene {
-  private grid!: Grid;
+  private state!: Game;
+  private controls!: KeyboardInput;
   private map!: Phaser.GameObjects.Graphics;
+  private playerGfx!: Phaser.GameObjects.Graphics;
   private seed = Date.now();
+  private accumulator = 0;
 
   constructor() {
     super('game');
@@ -16,15 +23,9 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     this.drawHud();
     this.map = this.add.graphics({ y: HUD_HEIGHT });
+    this.playerGfx = this.add.graphics();
+    this.controls = new KeyboardInput(this);
     this.newLevel();
-
-    // Placeholder until the player milestone.
-    this.add.circle(
-      PLAYER_SPAWN.x * TILE + TILE / 2,
-      HUD_HEIGHT + PLAYER_SPAWN.y * TILE + TILE / 2,
-      TILE * 0.35,
-      COLORS.player,
-    );
 
     this.input.keyboard?.on('keydown-R', () => {
       this.seed++;
@@ -32,15 +33,25 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  update(_time: number, deltaMs: number): void {
+    this.accumulator += Math.min(deltaMs / 1000, MAX_FRAME);
+    while (this.accumulator >= TICK) {
+      this.state.step(this.controls.read());
+      this.accumulator -= TICK;
+    }
+    drawPlayer(this.playerGfx, this.state.player, this.time.now);
+  }
+
   private newLevel(): void {
-    this.grid = generateLevel(createRng(this.seed));
+    this.state = new Game(this.seed);
+    this.accumulator = 0;
     this.drawGrid();
   }
 
   private drawHud(): void {
     this.add.rectangle(0, 0, WIDTH, HUD_HEIGHT, COLORS.hud).setOrigin(0);
     this.add
-      .text(16, HUD_HEIGHT / 2, 'STAGE 1    TIME 200    LIVES 3        R: new map', {
+      .text(16, HUD_HEIGHT / 2, 'STAGE 1   TIME 200   LIVES 3     Arrows/WASD · R: new map', {
         fontFamily: 'monospace',
         fontSize: '20px',
         color: COLORS.hudText,
@@ -50,7 +61,7 @@ export class GameScene extends Phaser.Scene {
 
   private drawGrid(): void {
     const g = this.map.clear();
-    this.grid.forEach((tile, x, y) => {
+    this.state.grid.forEach((tile, x, y) => {
       const px = x * TILE;
       const py = y * TILE;
       switch (tile) {
@@ -88,4 +99,25 @@ function drawSoft(g: Phaser.GameObjects.Graphics, px: number, py: number): void 
       g.fillRect(px + x0, py + r * h + 1, x1 - x0, h - 2);
     }
   }
+}
+
+function drawPlayer(g: Phaser.GameObjects.Graphics, p: Player, now: number): void {
+  const bob = p.moving ? Math.abs(Math.sin(now / 70)) * 3 : 0;
+  g.clear().setPosition(p.x * TILE, HUD_HEIGHT + p.y * TILE - bob);
+
+  const cx = TILE / 2;
+  // Body and feet.
+  g.fillStyle(COLORS.playerSuit).fillRoundedRect(cx - 11, 26, 22, 16, 5);
+  g.fillStyle(COLORS.playerAccent).fillRect(cx - 12, 40, 9, 6).fillRect(cx + 3, 40, 9, 6);
+  // Head.
+  g.fillStyle(COLORS.player).fillCircle(cx, 18, 14);
+  g.fillStyle(COLORS.playerAccent).fillCircle(cx, 3, 4);
+  if (p.facing === 'up') return;
+
+  // Face, shifted toward where the player is looking.
+  const look = p.facing === 'left' ? -4 : p.facing === 'right' ? 4 : 0;
+  g.fillStyle(COLORS.playerFace).fillRoundedRect(cx - 9 + look, 12, 18, 13, 5);
+  g.fillStyle(COLORS.playerEye);
+  if (look === 0) g.fillRect(cx - 5, 15, 3, 7).fillRect(cx + 2, 15, 3, 7);
+  else g.fillRect(cx - 1 + look, 15, 3, 7);
 }

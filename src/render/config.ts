@@ -14,6 +14,10 @@ export const COLORS = {
   soft: 0xa0643a,
   softMortar: 0x6b3f22,
   player: 0xffffff,
+  playerSuit: 0x3d5afe,
+  playerAccent: 0xff4081,
+  playerFace: 0xffcc99,
+  playerEye: 0x111111,
   hud: 0x1b1b1f,
   hudText: '#f5f5f5',
 };
