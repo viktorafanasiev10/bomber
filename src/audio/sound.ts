@@ -101,6 +101,12 @@ export class Sound {
       case 'power-up':
         this.arpeggio(['C5', 'E5', 'G5', 'C6', 'E6', 'G6'], t, 0.05, 'square', 0.15);
         break;
+      case 'coin':
+        this.arpeggio(['B5', 'E6'], t, 0.06, 'square', 0.12, 0.25);
+        break;
+      case 'extra-life':
+        this.arpeggio(['G5', 'B5', 'D6', 'G6', '-', 'D6', 'G6'], t, 0.07, 'triangle', 0.35, 0.3);
+        break;
       case 'player-died':
         this.tone(700, t, 0.9, 'square', 0.18, 60);
         this.tone(705, t, 0.9, 'square', 0.12, 58);

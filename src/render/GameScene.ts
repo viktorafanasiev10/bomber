@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
 import { BURN_TIME, FLAME_TIME, FUSE_TIME, type Bomb, type Burning, type FlameCell } from '../core/bomb';
-import { Campaign, DEATH_TIME } from '../core/campaign';
+import { Campaign, DEATH_TIME, MAX_LIVES } from '../core/campaign';
+import { DIFFICULTY } from '../core/difficulty';
 import { ENEMY_DEATH_TIME, type Enemy } from '../core/enemy';
 import { sound } from '../audio/sound';
 import { TICK, type GameEvent } from '../core/game';
 import { Tile, type Grid } from '../core/grid';
-import { SPEED_STEP, type Item } from '../core/items';
+import { EFFECT_TIME, SPEED_STEP, type Item } from '../core/items';
 import { BASE_SPEED, DIR_VEC, type Player } from '../core/player';
 import { Controls, wantsTouchControls } from '../input/controls';
 import { loadHighScore, loadSettings, submitScore } from '../storage';
@@ -15,6 +16,10 @@ import { DIFFICULTY_LABEL, ENEMY_LABEL } from './SettingsScene';
 /** Longest frame we simulate; avoids a burst of catch-up ticks after a stall. */
 const MAX_FRAME = 0.25;
 const LOW_TIME = 30;
+/** Seconds left on a drop or effect when it starts blinking as a warning. */
+const BLINK_TIME = 3;
+const HEART = 9;
+const HEART_GAP = 22;
 const TOUCH = wantsTouchControls();
 const CONTROLS_HINT = TOUCH
   ? 'BOMB drops a bomb, BOOM sets off remote bombs'
@@ -32,6 +37,7 @@ export class GameScene extends Phaser.Scene {
   private enemiesGfx!: Phaser.GameObjects.Graphics;
   private hudLeft!: Phaser.GameObjects.Text;
   private hudRight!: Phaser.GameObjects.Text;
+  private hearts!: Phaser.GameObjects.Graphics;
   private overlay!: Phaser.GameObjects.Container;
   private overlayBg!: Phaser.GameObjects.Rectangle;
   private overlayTitle!: Phaser.GameObjects.Text;
@@ -166,7 +172,27 @@ export class GameScene extends Phaser.Scene {
     this.hudLeft.setText(`STAGE ${c.stage}   TIME ${String(time).padStart(3, ' ')}   SCORE ${c.score}`);
     this.hudLeft.setColor(time <= LOW_TIME && c.phase === 'playing' ? COLORS.hudWarn : COLORS.hudText);
     const extras = `${player.kick ? '  KICK' : ''}${player.remote ? '  REMOTE' : ''}`;
-    this.hudRight.setText(`LIVES ${c.lives}   B${player.maxBombs} F${player.range} S${speed}${extras}`);
+    this.hudRight.setText(`B${player.maxBombs} F${player.range} S${speed}${extras}`);
+    this.drawHearts(c.lives);
+  }
+
+  /** Lives as hearts between the left and right HUD text; a lost life leaves an empty outline. */
+  private drawHearts(lives: number): void {
+    const g = this.hearts.clear();
+    const slots = Math.max(lives, DIFFICULTY[this.campaign.run.difficulty].lives);
+    const x0 = this.hudLeft.x + this.hudLeft.width + 24 + HEART;
+    // The newest heart pulses gently so the row reads as alive.
+    const beat = 1 + 0.08 * Math.max(0, Math.sin(this.time.now / 160));
+    for (let i = 0; i < Math.min(slots, MAX_LIVES); i++) {
+      const cx = x0 + i * HEART_GAP;
+      const cy = HUD_HEIGHT / 2;
+      if (i < lives) {
+        drawHeart(g, cx, cy, HEART * (i === lives - 1 ? beat : 1), COLORS.heart);
+        g.fillStyle(0xffffff, 0.7).fillCircle(cx - HEART * 0.45, cy - HEART * 0.45, HEART * 0.2);
+      } else {
+        drawHeart(g, cx, cy, HEART, COLORS.heartEmpty);
+      }
+    }
   }
 
   private updateOverlay(): void {
@@ -240,6 +266,7 @@ export class GameScene extends Phaser.Scene {
     const style = { fontFamily: 'monospace', fontSize: '16px', color: COLORS.hudText };
     this.hudLeft = this.add.text(14, HUD_HEIGHT / 2, '', style).setOrigin(0, 0.5);
     this.hudRight = this.add.text(WIDTH - 14, HUD_HEIGHT / 2, '', style).setOrigin(1, 0.5);
+    this.hearts = this.add.graphics();
   }
 
   private createOverlay(): void {
@@ -326,6 +353,14 @@ function drawPlayer(g: Phaser.GameObjects.Graphics, p: Player, now: number, dead
   g.setAlpha(p.alive ? 1 : (1 - dying) * (Math.floor(now / 80) % 2 ? 1 : 0.4));
 
   const cx = TILE / 2;
+  // Effects blink as a warning when they're about to run out.
+  const showing = (left: number) => left > BLINK_TIME || (left > 0 && Math.floor(now / 120) % 2 === 0);
+  if (p.alive && showing(p.wallPass)) g.setAlpha(0.55);
+  if (p.alive && showing(p.fireproof)) {
+    const glow = 0.25 + 0.15 * Math.sin(now / 90);
+    g.fillStyle(COLORS.flameOuter, glow).fillCircle(cx, TILE / 2, TILE * 0.55);
+    g.lineStyle(2, COLORS.flameMid, 0.8).strokeCircle(cx, TILE / 2, TILE * 0.55);
+  }
   // Body and feet.
   g.fillStyle(COLORS.playerSuit).fillRoundedRect(cx - 11, 26, 22, 16, 5);
   // Feet alternate while walking.
@@ -335,6 +370,7 @@ function drawPlayer(g: Phaser.GameObjects.Graphics, p: Player, now: number, dead
   // Head.
   g.fillStyle(COLORS.player).fillCircle(cx, 18, 14);
   g.fillStyle(COLORS.playerAccent).fillCircle(cx, 3, 4);
+  if (p.alive) drawEffectBars(g, p);
   if (p.facing === 'up') return;
 
   // Face, shifted toward where the player is looking.
@@ -498,8 +534,26 @@ function drawItem(g: Phaser.GameObjects.Graphics, item: Item, open: boolean, now
     return;
   }
 
+  // Drops about to vanish flicker out.
+  if (item.ttl !== undefined && item.ttl < BLINK_TIME && Math.floor(now / 100) % 2) return;
+  const cx = px + TILE / 2;
+  const cy = py + TILE / 2;
+
+  if (item.kind === 'coin') {
+    // A spinning coin: squash its width over time.
+    const w = 11 * Math.abs(Math.cos(now / 220)) + 2;
+    g.fillStyle(0x000000, 0.3).fillEllipse(cx, cy + 13, 18, 5);
+    g.fillStyle(COLORS.coinDark).fillEllipse(cx, cy + 1, w * 2, 26);
+    g.fillStyle(COLORS.coin).fillEllipse(cx, cy, w * 2 - 4, 22);
+    if (w > 6) g.fillStyle(COLORS.coinDark).fillRect(cx - 1.5, cy - 6, 3, 12);
+    return;
+  }
+
   // Power-ups blink gently so they read as pickups, not floor.
   const bg = {
+    life: COLORS.puLife,
+    fireproof: COLORS.puFireproof,
+    wallpass: COLORS.puWallpass,
     bomb: COLORS.puBomb,
     fire: COLORS.puFire,
     speed: COLORS.puSpeed,
@@ -508,9 +562,18 @@ function drawItem(g: Phaser.GameObjects.Graphics, item: Item, open: boolean, now
   }[item.kind];
   g.fillStyle(0x000000, 0.35).fillRoundedRect(px + m + 2, py + m + 3, TILE - 2 * m, TILE - 2 * m, 6);
   g.fillStyle(bg, Math.floor(now / 250) % 2 ? 1 : 0.85).fillRoundedRect(px + m, py + m, TILE - 2 * m, TILE - 2 * m, 6);
-  const cx = px + TILE / 2;
-  const cy = py + TILE / 2;
-  if (item.kind === 'bomb') {
+  if (item.kind === 'life') {
+    drawHeart(g, cx, cy + 1, 10, COLORS.heart);
+  } else if (item.kind === 'fireproof') {
+    // A shield with a flame on it.
+    g.fillStyle(0xffffff).fillRoundedRect(cx - 10, cy - 11, 20, 13, 3).fillTriangle(cx - 10, cy + 1, cx + 10, cy + 1, cx, cy + 13);
+    g.fillStyle(COLORS.flameOuter).fillCircle(cx, cy + 1, 5).fillTriangle(cx - 5, cy, cx + 5, cy, cx, cy - 9);
+  } else if (item.kind === 'wallpass') {
+    // A ghost stepping through a brick.
+    g.fillStyle(COLORS.soft).fillRect(cx - 11, cy - 9, 9, 18);
+    g.fillStyle(0xffffff, 0.9).fillCircle(cx + 3, cy - 2, 7).fillRect(cx - 4, cy - 2, 14, 9);
+    g.fillStyle(COLORS.playerEye).fillCircle(cx + 1, cy - 2, 1.5).fillCircle(cx + 6, cy - 2, 1.5);
+  } else if (item.kind === 'bomb') {
     g.fillStyle(COLORS.bomb).fillCircle(cx, cy + 2, 9);
     g.fillStyle(COLORS.bombFuse).fillRect(cx + 4, cy - 11, 3, 6);
     g.fillStyle(COLORS.bombShine).fillCircle(cx - 3, cy - 1, 2);
@@ -523,9 +586,34 @@ function drawItem(g: Phaser.GameObjects.Graphics, item: Item, open: boolean, now
   } else if (item.kind === 'kick') {
     // A boot.
     g.fillStyle(0xffffff).fillRect(cx - 7, cy - 10, 8, 14).fillRoundedRect(cx - 7, cy + 1, 17, 8, 3);
-  } else {
+  } else if (item.kind === 'remote') {
     // A detonator: box with a plunger.
     g.fillStyle(0xffffff).fillRect(cx - 9, cy - 1, 18, 10).fillRect(cx - 2, cy - 10, 4, 9).fillRect(cx - 7, cy - 12, 14, 3);
     g.fillStyle(COLORS.remoteLight).fillCircle(cx + 5, cy + 4, 2);
+  }
+}
+
+/** A heart centred on (cx, cy), `r` across each lobe. */
+function drawHeart(g: Phaser.GameObjects.Graphics, cx: number, cy: number, r: number, color: number): void {
+  const lobe = r * 0.55;
+  g.fillStyle(color);
+  g.fillCircle(cx - lobe, cy - lobe * 0.4, lobe);
+  g.fillCircle(cx + lobe, cy - lobe * 0.4, lobe);
+  g.fillTriangle(cx - r * 1.08, cy - lobe * 0.15, cx + r * 1.08, cy - lobe * 0.15, cx, cy + r);
+}
+
+/** Shrinking timer bars above the player's head, one per active effect. */
+function drawEffectBars(g: Phaser.GameObjects.Graphics, p: Player): void {
+  const bars: [number, number, number][] = [
+    [p.fireproof, EFFECT_TIME.fireproof, COLORS.puFireproof],
+    [p.wallPass, EFFECT_TIME.wallpass, COLORS.puWallpass],
+  ];
+  let y = -6;
+  for (const [left, total, color] of bars) {
+    if (left <= 0) continue;
+    const w = TILE - 8;
+    g.fillStyle(0x000000, 0.6).fillRect(3, y - 1, w + 2, 5);
+    g.fillStyle(color).fillRect(4, y, w * Math.min(1, left / total), 3);
+    y -= 6;
   }
 }

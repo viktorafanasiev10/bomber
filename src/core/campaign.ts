@@ -11,6 +11,8 @@ export const INTRO_TIME = 2;
 export const DEATH_TIME = 2;
 export const CLEAR_TIME = 3;
 export const TIME_BONUS_PER_SECOND = 10;
+/** Extra-life pickups can't raise lives past this (it's also how many hearts the HUD fits). */
+export const MAX_LIVES = 5;
 
 export type Phase = 'intro' | 'playing' | 'dying' | 'cleared' | 'gameover';
 
@@ -63,6 +65,7 @@ export class Campaign {
         break;
       case 'playing':
         this.game.step(input);
+        this.collectLives();
         if (!this.game.player.alive) this.setPhase('dying');
         else if (this.game.exited) this.clearStage();
         break;
@@ -80,6 +83,11 @@ export class Campaign {
         if (input.bomb && this.phaseTime >= 1) this.reset();
         break;
     }
+  }
+
+  private collectLives(): void {
+    this.lives = Math.min(MAX_LIVES, this.lives + this.game.extraLives);
+    this.game.extraLives = 0;
   }
 
   private clearStage(): void {
