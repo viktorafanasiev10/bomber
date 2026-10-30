@@ -87,7 +87,10 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, deltaMs: number): void {
     if (this.controls.consume('mute')) sound.toggleMute();
     if (this.controls.consume('pause')) this.setPaused(!this.paused);
-    if (this.controls.consume('quit') && this.canQuit()) return this.quit();
+    if (this.controls.consume('quit') && this.canQuit()) {
+      this.quit();
+      return;
+    }
 
     if (this.paused) {
       this.controls.read(); // drop presses made while paused

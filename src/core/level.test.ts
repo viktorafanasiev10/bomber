@@ -44,14 +44,18 @@ describe('generateLevel', () => {
 
   it('adds soft blocks', () => {
     let soft = 0;
-    grid.forEach((t) => soft += t === Tile.Soft ? 1 : 0);
+    grid.forEach((t) => {
+      if (t === Tile.Soft) soft++;
+    });
     expect(soft).toBeGreaterThan(20);
   });
 
   it('is deterministic for a seed', () => {
     const a = generateLevel(createRng(7));
     const b = generateLevel(createRng(7));
-    a.forEach((t, x, y) => expect(b.get(x, y)).toBe(t));
+    a.forEach((t, x, y) => {
+      expect(b.get(x, y)).toBe(t);
+    });
   });
 
   it('treats out-of-bounds as solid', () => {

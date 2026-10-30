@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BURN_TIME, computeBlast, FLAME_TIME, FUSE_TIME } from './bomb';
 import { Game, TICK } from './game';
-import { Grid, Tile } from './grid';
+import { type Grid, Tile } from './grid';
 import { generateLevel } from './level';
 import type { Dir } from './player';
 import { createRng } from './rng';

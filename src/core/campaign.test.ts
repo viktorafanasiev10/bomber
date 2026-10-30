@@ -11,7 +11,9 @@ function run(c: Campaign, seconds: number, input = idle) {
 
 function snapshot(c: Campaign): string {
   let s = '';
-  c.game.grid.forEach((t) => (s += t));
+  c.game.grid.forEach((t) => {
+    s += t;
+  });
   return s;
 }
 
@@ -92,7 +94,7 @@ describe('Campaign events', () => {
     c.step({ dir: null, bomb: true });
     expect(c.drainEvents()).toEqual(['bomb']);
 
-    c.game.enemies.forEach((e) => (e.alive = false));
+    for (const e of c.game.enemies) e.alive = false;
     c.game.exited = true;
     c.step(idle);
     expect(c.drainEvents()).toEqual(['stage-clear']);
@@ -104,7 +106,7 @@ describe('Campaign events', () => {
     c.drainEvents();
     const g = c.game;
     const [first, ...rest] = g.enemies;
-    rest.forEach((e) => (e.alive = false));
+    for (const e of rest) e.alive = false;
     g.bombs.push({ ...first.tile, fuse: TICK, range: 1, passable: false });
     g.player.x = first.tile.x; // stand in the blast too
     g.player.y = first.tile.y;
