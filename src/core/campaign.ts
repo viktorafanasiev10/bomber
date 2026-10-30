@@ -24,6 +24,8 @@ export class Campaign {
   readonly run: RunSettings;
   stage = 1;
   lives: number;
+  /** Most lives held at once this run, so the HUD can show lost ones as empty hearts. */
+  peakLives: number;
   /** Score from finished stages; the live total adds the current stage's score. */
   bankedScore = 0;
   stats: PlayerStats;
@@ -38,6 +40,7 @@ export class Campaign {
     this.seed = seed;
     this.run = run;
     this.lives = DIFFICULTY[run.difficulty].lives;
+    this.peakLives = this.lives;
     this.stats = { ...DIFFICULTY[run.difficulty].startStats };
     this.game = this.buildStage();
   }
@@ -87,6 +90,7 @@ export class Campaign {
 
   private collectLives(): void {
     this.lives = Math.min(MAX_LIVES, this.lives + this.game.extraLives);
+    this.peakLives = Math.max(this.peakLives, this.lives);
     this.game.extraLives = 0;
   }
 
@@ -113,6 +117,7 @@ export class Campaign {
   private reset(): void {
     this.stage = 1;
     this.lives = DIFFICULTY[this.run.difficulty].lives;
+    this.peakLives = this.lives;
     this.bankedScore = 0;
     this.stats = { ...DIFFICULTY[this.run.difficulty].startStats };
     this.restartStage();

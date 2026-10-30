@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import { BURN_TIME, FLAME_TIME, FUSE_TIME, type Bomb, type Burning, type FlameCell } from '../core/bomb';
-import { Campaign, DEATH_TIME, MAX_LIVES } from '../core/campaign';
-import { DIFFICULTY } from '../core/difficulty';
+import { Campaign, DEATH_TIME } from '../core/campaign';
 import { ENEMY_DEATH_TIME, type Enemy } from '../core/enemy';
 import { sound } from '../audio/sound';
 import { TICK, type GameEvent } from '../core/game';
@@ -173,24 +172,25 @@ export class GameScene extends Phaser.Scene {
     this.hudLeft.setColor(time <= LOW_TIME && c.phase === 'playing' ? COLORS.hudWarn : COLORS.hudText);
     const extras = `${player.kick ? '  KICK' : ''}${player.remote ? '  REMOTE' : ''}`;
     this.hudRight.setText(`B${player.maxBombs} F${player.range} S${speed}${extras}`);
-    this.drawHearts(c.lives);
+    this.drawHearts(c.lives, c.peakLives);
   }
 
   /** Lives as hearts between the left and right HUD text; a lost life leaves an empty outline. */
-  private drawHearts(lives: number): void {
+  private drawHearts(lives: number, slots: number): void {
     const g = this.hearts.clear();
-    const slots = Math.max(lives, DIFFICULTY[this.campaign.run.difficulty].lives);
     const x0 = this.hudLeft.x + this.hudLeft.width + 24 + HEART;
     // The newest heart pulses gently so the row reads as alive.
     const beat = 1 + 0.08 * Math.max(0, Math.sin(this.time.now / 160));
-    for (let i = 0; i < Math.min(slots, MAX_LIVES); i++) {
+    for (let i = 0; i < slots; i++) {
       const cx = x0 + i * HEART_GAP;
       const cy = HUD_HEIGHT / 2;
       if (i < lives) {
         drawHeart(g, cx, cy, HEART * (i === lives - 1 ? beat : 1), COLORS.heart);
         g.fillStyle(0xffffff, 0.7).fillCircle(cx - HEART * 0.45, cy - HEART * 0.45, HEART * 0.2);
       } else {
+        // An outline: a dim heart with a smaller one in the HUD colour punched out of it.
         drawHeart(g, cx, cy, HEART, COLORS.heartEmpty);
+        drawHeart(g, cx, cy + 1, HEART * 0.62, COLORS.hud);
       }
     }
   }

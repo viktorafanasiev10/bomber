@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Campaign, INTRO_TIME, MAX_LIVES, START_LIVES } from './campaign';
+import { Campaign, DEATH_TIME, INTRO_TIME, MAX_LIVES, START_LIVES } from './campaign';
 import { Enemy, ENEMY_DEATH_TIME } from './enemy';
 import { Game, POINTS_PER_POWER_UP, TICK } from './game';
 import { Tile, type Grid } from './grid';
@@ -153,5 +153,17 @@ describe('extra life', () => {
       expect(c.lives).toBe(Math.min(START_LIVES + i + 1, MAX_LIVES));
     }
     expect(c.game.score).toBe(MAX_LIVES * POINTS_PER_POWER_UP);
+  });
+
+  it('remembers the most lives held, so a lost one still shows as an empty heart', () => {
+    const c = new Campaign(1);
+    for (let t = 0; t < INTRO_TIME + TICK; t += TICK) c.step(idle);
+    const p = c.game.player;
+    c.game.items.push({ x: p.tile.x, y: p.tile.y, kind: 'life' });
+    c.step(idle);
+    p.alive = false;
+    for (let t = 0; t < DEATH_TIME + 3 * TICK; t += TICK) c.step(idle);
+    expect(c.lives).toBe(START_LIVES);
+    expect(c.peakLives).toBe(START_LIVES + 1);
   });
 });
