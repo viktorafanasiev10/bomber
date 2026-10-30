@@ -85,6 +85,10 @@ export class Player {
   range = 2;
   kick = false;
   remote = false;
+  /** Seconds left immune to flames. */
+  fireproof = 0;
+  /** Seconds left able to walk through soft blocks. */
+  wallPass = 0;
   alive = true;
 
   constructor(spawn: Point) {

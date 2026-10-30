@@ -11,6 +11,8 @@ export const INTRO_TIME = 2;
 export const DEATH_TIME = 2;
 export const CLEAR_TIME = 3;
 export const TIME_BONUS_PER_SECOND = 10;
+/** Extra-life pickups can't raise lives past this (it's also how many hearts the HUD fits). */
+export const MAX_LIVES = 5;
 
 export type Phase = 'intro' | 'playing' | 'dying' | 'cleared' | 'gameover';
 
@@ -22,6 +24,8 @@ export class Campaign {
   readonly run: RunSettings;
   stage = 1;
   lives: number;
+  /** Most lives held at once this run, so the HUD can show lost ones as empty hearts. */
+  peakLives: number;
   /** Score from finished stages; the live total adds the current stage's score. */
   bankedScore = 0;
   stats: PlayerStats;
@@ -36,6 +40,7 @@ export class Campaign {
     this.seed = seed;
     this.run = run;
     this.lives = DIFFICULTY[run.difficulty].lives;
+    this.peakLives = this.lives;
     this.stats = { ...DIFFICULTY[run.difficulty].startStats };
     this.game = this.buildStage();
   }
@@ -63,6 +68,7 @@ export class Campaign {
         break;
       case 'playing':
         this.game.step(input);
+        this.collectLives();
         if (!this.game.player.alive) this.setPhase('dying');
         else if (this.game.exited) this.clearStage();
         break;
@@ -80,6 +86,12 @@ export class Campaign {
         if (input.bomb && this.phaseTime >= 1) this.reset();
         break;
     }
+  }
+
+  private collectLives(): void {
+    this.lives = Math.min(MAX_LIVES, this.lives + this.game.extraLives);
+    this.peakLives = Math.max(this.peakLives, this.lives);
+    this.game.extraLives = 0;
   }
 
   private clearStage(): void {
@@ -105,6 +117,7 @@ export class Campaign {
   private reset(): void {
     this.stage = 1;
     this.lives = DIFFICULTY[this.run.difficulty].lives;
+    this.peakLives = this.lives;
     this.bankedScore = 0;
     this.stats = { ...DIFFICULTY[this.run.difficulty].startStats };
     this.restartStage();

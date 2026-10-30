@@ -50,4 +50,11 @@ export const COLORS = {
   puFire: 0xd32f2f,
   puSpeed: 0x00897b,
   popupText: '#ffffff',
+  heart: 0xff1744,
+  heartEmpty: 0x8a3a48,
+  coin: 0xffd54f,
+  coinDark: 0xc79100,
+  puLife: 0xf8bbd0,
+  puFireproof: 0xef6c00,
+  puWallpass: 0x5e35b1,
 };

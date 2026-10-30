@@ -10,7 +10,19 @@ import {
 } from './bomb';
 import { CONTACT_DISTANCE, ENEMY_DEATH_TIME, spawnEnemies, type Enemy } from './enemy';
 import { Tile, type Grid } from './grid';
-import { applyPowerUp, hideItems, tileKey, type Item, type ItemKind, type PlayerStats } from './items';
+import {
+  applyPowerUp,
+  COIN_POINTS,
+  DROP_LIFETIME,
+  EFFECT_TIME,
+  hideItems,
+  isEffect,
+  rollDrop,
+  tileKey,
+  type Item,
+  type ItemKind,
+  type PlayerStats,
+} from './items';
 import { generateLevel, PLAYER_SPAWN } from './level';
 import { DIR_VEC, Player, type Dir, type PlayerInput } from './player';
 import { createRng, type Rng } from './rng';
@@ -27,6 +39,8 @@ export type GameEvent =
   | 'explosion'
   | 'enemy-killed'
   | 'power-up'
+  | 'coin'
+  | 'extra-life'
   | 'player-died'
   | 'exit-open'
   | 'stage-start'
@@ -64,6 +78,8 @@ export class Game {
   items: Item[] = [];
   /** The player walked into the open exit. */
   exited = false;
+  /** Extra lives picked up and not yet collected by the campaign. */
+  extraLives = 0;
   /** Events since the renderer last drained them. */
   events: GameEvent[] = [];
 
@@ -105,6 +121,7 @@ export class Game {
       if (input.bomb) this.placeBomb();
       if (input.detonate && p.remote && this.bombs.length) this.detonate(this.bombs[0]);
       this.timeLeft = Math.max(0, this.timeLeft - TICK);
+      this.updateEffects();
     } else {
       this.deadFor += TICK;
     }
@@ -114,15 +131,37 @@ export class Game {
     this.updateEnemies();
     this.updateItems();
 
-    if (p.alive && (this.isOnFire(p.tile.x, p.tile.y) || this.touchesEnemy() || this.timeLeft <= 0)) {
+    const burnt = p.fireproof <= 0 && this.isOnFire(p.tile.x, p.tile.y);
+    if (p.alive && (burnt || this.touchesEnemy() || this.timeLeft <= 0)) {
       p.alive = false;
       this.events.push('player-died');
     }
   }
 
+  private updateEffects(): void {
+    const p = this.player;
+    p.fireproof = Math.max(0, p.fireproof - TICK);
+    // Wall-pass never runs out while the player is inside a block, or they'd be stuck in it.
+    if (p.wallPass > 0) p.wallPass = Math.max(this.overlapsSoft() ? TICK : 0, p.wallPass - TICK);
+  }
+
+  private overlapsSoft(): boolean {
+    const { x, y } = this.player;
+    const eps = 1e-6;
+    for (const tx of new Set([Math.floor(x + eps), Math.ceil(x - eps)])) {
+      for (const ty of new Set([Math.floor(y + eps), Math.ceil(y - eps)])) {
+        if (this.grid.get(tx, ty) === Tile.Soft) return true;
+      }
+    }
+    return false;
+  }
+
   private updateItems(): void {
-    // Flames destroy exposed power-ups (the exit door survives).
-    this.items = this.items.filter((i) => i.kind === 'exit' || !this.isOnFire(i.x, i.y));
+    // Drops vanish after a while; flames destroy exposed pickups (the exit door survives).
+    for (const i of this.items) if (i.ttl !== undefined) i.ttl -= TICK;
+    this.items = this.items.filter(
+      (i) => (i.ttl === undefined || i.ttl > 0) && (i.kind === 'exit' || !this.isOnFire(i.x, i.y)),
+    );
 
     const p = this.player;
     if (!p.alive) return;
@@ -130,12 +169,34 @@ export class Game {
     if (!item) return;
     if (item.kind === 'exit') {
       this.exited = this.cleared;
-    } else {
-      applyPowerUp(p, item.kind);
-      this.events.push('power-up');
-      this.score += POINTS_PER_POWER_UP;
-      this.items = this.items.filter((i) => i !== item);
+      return;
     }
+    if (item.kind === 'coin') {
+      this.score += COIN_POINTS;
+      this.events.push('coin');
+    } else if (item.kind === 'life') {
+      this.extraLives++;
+      this.score += POINTS_PER_POWER_UP; // still worth something when lives are maxed out
+      this.events.push('extra-life');
+    } else {
+      if (isEffect(item.kind)) {
+        if (item.kind === 'fireproof') p.fireproof = EFFECT_TIME.fireproof;
+        else p.wallPass = EFFECT_TIME.wallpass;
+      } else {
+        applyPowerUp(p, item.kind);
+      }
+      this.score += POINTS_PER_POWER_UP;
+      this.events.push('power-up');
+    }
+    this.items = this.items.filter((i) => i !== item);
+  }
+
+  /** A defeated enemy may leave something on the tile where it vanished. */
+  private dropLoot(e: Enemy): void {
+    const { x, y } = e.tile;
+    if (this.grid.isSolid(x, y) || this.itemAt(x, y)) return;
+    const kind = rollDrop(this.rng);
+    if (kind) this.items.push({ x, y, kind, ttl: DROP_LIFETIME });
   }
 
   private updateEnemies(): void {
@@ -151,6 +212,8 @@ export class Game {
       }
     }
     if (!wasCleared && this.cleared) this.events.push('exit-open');
+    // Loot appears once the death animation ends, so the killing flame can't burn it.
+    for (const e of this.enemies) if (e.deadFor >= ENEMY_DEATH_TIME) this.dropLoot(e);
     this.enemies = this.enemies.filter((e) => e.deadFor < ENEMY_DEATH_TIME);
   }
 
@@ -172,7 +235,7 @@ export class Game {
   placeBomb(): boolean {
     const p = this.player;
     const { x, y } = p.tile;
-    if (!p.alive || this.bombs.length >= p.maxBombs || this.bombAt(x, y)) return false;
+    if (!p.alive || this.bombs.length >= p.maxBombs || this.bombAt(x, y) || this.grid.isSolid(x, y)) return false;
     // With the remote, bombs only go off when detonated (or caught in another blast).
     this.bombs.push({ x, y, fuse: p.remote ? Infinity : FUSE_TIME, range: p.range, passable: true });
     this.events.push('bomb');
@@ -180,7 +243,8 @@ export class Game {
   }
 
   private isBlocked(x: number, y: number): boolean {
-    if (this.grid.isSolid(x, y)) return true;
+    const tile = this.grid.get(x, y);
+    if (tile === Tile.Hard || (tile === Tile.Soft && this.player.wallPass <= 0)) return true;
     const bomb = this.bombAt(x, y);
     return !!bomb && !bomb.passable;
   }

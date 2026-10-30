@@ -1,14 +1,51 @@
 import { Tile, type Grid, type Point } from './grid';
 import type { Rng } from './rng';
 
+/** Permanent upgrades, kept across lives and stages. */
 export type PowerUpKind = 'bomb' | 'fire' | 'speed' | 'kick' | 'remote';
-export type ItemKind = 'exit' | PowerUpKind;
+/** Timed effects that last until they run out (or the player dies). */
+export type EffectKind = 'fireproof' | 'wallpass';
+/** What a defeated enemy can leave behind. */
+export type DropKind = 'coin' | 'life' | PowerUpKind | EffectKind;
+export type ItemKind = 'exit' | DropKind;
 
 export interface Item {
   x: number;
   y: number;
   kind: ItemKind;
+  /** Seconds until a dropped item vanishes (hidden items stay put). */
+  ttl?: number;
 }
+
+/** Seconds each effect lasts. */
+export const EFFECT_TIME: Record<EffectKind, number> = { fireproof: 10, wallpass: 15 };
+export const COIN_POINTS = 500;
+/** Seconds a drop lies on the floor before vanishing. */
+export const DROP_LIFETIME = 10;
+
+/** Relative odds of each drop; `null` means the enemy leaves nothing. */
+const DROP_TABLE: [DropKind | null, number][] = [
+  [null, 40],
+  ['coin', 35],
+  ['bomb', 6],
+  ['fire', 6],
+  ['speed', 3],
+  ['fireproof', 4],
+  ['wallpass', 4],
+  ['life', 2],
+];
+const DROP_TOTAL = DROP_TABLE.reduce((sum, [, w]) => sum + w, 0);
+
+export function rollDrop(rng: Rng): DropKind | null {
+  let roll = rng() * DROP_TOTAL;
+  for (const [kind, weight] of DROP_TABLE) {
+    roll -= weight;
+    if (roll < 0) return kind;
+  }
+  return null;
+}
+
+export const isEffect = (kind: ItemKind): kind is EffectKind => kind === 'fireproof' || kind === 'wallpass';
 
 export const MAX_BOMBS = 8;
 export const MAX_RANGE = 8;
