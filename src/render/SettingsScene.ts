@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { sound } from '../audio/sound';
 import { DIFFICULTY, type Difficulty, type EnemyMode } from '../core/difficulty';
+import { isPostHogConfigured, posthog } from '../posthog';
 import { loadSettings, saveSettings, type Settings } from '../storage';
 import { COLORS, HEIGHT, WIDTH } from './config';
 import { Menu } from './Menu';
@@ -62,14 +63,14 @@ export class SettingsScene extends Phaser.Scene {
       [
         {
           label: () => `Difficulty:  ${DIFFICULTY_LABEL[s.difficulty]}`,
-          change: (d) => this.applyChange(() => (s.difficulty = cycle(DIFFICULTIES, s.difficulty, d))),
+          change: (d) => this.applyChange('difficulty', () => (s.difficulty = cycle(DIFFICULTIES, s.difficulty, d))),
         },
         {
           label: () => `Enemies:  ${ENEMY_LABEL[s.enemies]}`,
-          change: (d) => this.applyChange(() => (s.enemies = cycle(ENEMY_MODES, s.enemies, d))),
+          change: (d) => this.applyChange('enemy_mode', () => (s.enemies = cycle(ENEMY_MODES, s.enemies, d))),
         },
-        { label: () => `Music:  ${onOff(s.music)}`, change: () => this.applyChange(() => (s.music = !s.music)) },
-        { label: () => `Sound effects:  ${onOff(s.sfx)}`, change: () => this.applyChange(() => (s.sfx = !s.sfx)) },
+        { label: () => `Music:  ${onOff(s.music)}`, change: () => this.applyChange('music', () => (s.music = !s.music)) },
+        { label: () => `Sound effects:  ${onOff(s.sfx)}`, change: () => this.applyChange('sound_effects', () => (s.sfx = !s.sfx)) },
         { label: () => 'Back', select: back },
       ],
       { spacing: 52, onBack: back },
@@ -99,8 +100,12 @@ export class SettingsScene extends Phaser.Scene {
   }
 
   /** Applies an option change, then saves it and lets you hear it. */
-  private applyChange(apply: () => void): void {
+  private applyChange(setting: 'difficulty' | 'enemy_mode' | 'music' | 'sound_effects', apply: () => void): void {
     apply();
+    if (isPostHogConfigured) {
+      const value = setting === 'enemy_mode' ? this.settings.enemies : setting === 'sound_effects' ? this.settings.sfx : this.settings[setting];
+      posthog.capture('settings_changed', { setting, value });
+    }
     saveSettings(this.settings);
     sound.configure(this.settings);
     sound.play('select');

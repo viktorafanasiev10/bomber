@@ -12,7 +12,8 @@
     "lint": "biome lint"
   },
   "dependencies": {
-    "phaser": "^4.2.1"
+    "phaser": "^4.2.1",
+    "posthog-js": "^1.444.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",

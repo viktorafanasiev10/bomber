@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { sound } from '../audio/sound';
 import { wantsTouchControls } from '../input/controls';
+import { isPostHogConfigured, posthog } from '../posthog';
 import { loadHighScore, loadSettings } from '../storage';
 import { COLORS, HEIGHT, WIDTH } from './config';
 import { Menu } from './Menu';
@@ -75,6 +76,17 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private start(): void {
+    const settings = loadSettings();
+    if (isPostHogConfigured) {
+      posthog.capture('game_started', {
+        difficulty: settings.difficulty,
+        enemy_mode: settings.enemies,
+      });
+      posthog.logger.info('game session started', {
+        difficulty: settings.difficulty,
+        enemy_mode: settings.enemies,
+      });
+    }
     sound.unlock();
     sound.play('select');
     this.scene.start('game');

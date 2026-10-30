@@ -8,6 +8,7 @@ import { Tile, type Grid } from '../core/grid';
 import { EFFECT_TIME, SPEED_STEP, type Item } from '../core/items';
 import { BASE_SPEED, DIR_VEC, type Player } from '../core/player';
 import { Controls, wantsTouchControls } from '../input/controls';
+import { isPostHogConfigured, posthog } from '../posthog';
 import { loadHighScore, loadSettings, submitScore } from '../storage';
 import { COLORS, HEIGHT, HUD_HEIGHT, TILE, WIDTH } from './config';
 import { DIFFICULTY_LABEL, ENEMY_LABEL } from './SettingsScene';
@@ -153,13 +154,57 @@ export class GameScene extends Phaser.Scene {
           this.cameras.main.shake(180, 0.006);
           break;
         case 'stage-start':
+          if (isPostHogConfigured) {
+            posthog.capture('stage_started', {
+              stage: this.campaign.stage,
+              difficulty: this.campaign.run.difficulty,
+              enemy_mode: this.campaign.run.enemies,
+            });
+            posthog.logger.info('stage started', {
+              stage: this.campaign.stage,
+              difficulty: this.campaign.run.difficulty,
+              enemy_mode: this.campaign.run.enemies,
+            });
+          }
           sound.startMusic();
           break;
         case 'player-died':
+          sound.stopMusic();
+          break;
         case 'stage-clear':
+          if (isPostHogConfigured) {
+            posthog.capture('stage_completed', {
+              stage: this.campaign.stage,
+              score: this.campaign.score,
+              lives_remaining: this.campaign.lives,
+              difficulty: this.campaign.run.difficulty,
+              enemy_mode: this.campaign.run.enemies,
+            });
+            posthog.logger.info('stage completed', {
+              stage: this.campaign.stage,
+              score: this.campaign.score,
+              lives_remaining: this.campaign.lives,
+              difficulty: this.campaign.run.difficulty,
+              enemy_mode: this.campaign.run.enemies,
+            });
+          }
           sound.stopMusic();
           break;
         case 'game-over':
+          if (isPostHogConfigured) {
+            posthog.capture('game_over', {
+              stage: this.campaign.stage,
+              score: this.campaign.score,
+              difficulty: this.campaign.run.difficulty,
+              enemy_mode: this.campaign.run.enemies,
+            });
+            posthog.logger.info('game over', {
+              stage: this.campaign.stage,
+              score: this.campaign.score,
+              difficulty: this.campaign.run.difficulty,
+              enemy_mode: this.campaign.run.enemies,
+            });
+          }
           this.newRecord = submitScore(this.campaign.score, this.campaign.run);
           break;
       }

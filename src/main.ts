@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import './posthog';
 import { sound } from './audio/sound';
 import { wantsTouchControls } from './input/controls';
 import { GameScene } from './render/GameScene';
